@@ -10,15 +10,41 @@ clone:
 
 steps:
 
-- name: check - final test step
-  image: ubuntu:18.04
+- name: decrypt - managing secret solution files
+  # cp. https://hub.docker.com/r/frapsoft/openssl
+  image: frapsoft/openssl
+  environment:
+    KEY:
+      from_secret: key
   commands:
-  - echo ${DRONE_GIT_HTTP_URL}
-  - echo ${DRONE_BRANCH}
-  - pwd
-  - echo "--- Drone pipeline test successfully terminated ---"
+  - openssl enc -d -aes-256-cbc -md sha256 -pass env:KEY -in ./${DRONE_BRANCH}/src.tar.enc -out ./${DRONE_BRANCH}/src.tar
+  - tar -xvf ./${DRONE_BRANCH}/src.tar
+
+
+- name: build all docker images needed
+  image: docker
+  volumes:
+  - name: dockersock
+    path: /var/run/docker.sock
+  commands:
+  - docker --version && cd src 
+  - docker build --quiet -t ${DRONE_BRANCH}.run -f Dockerfile.ubuntu.git.df .
+
+- name: check - check if upload is correct
+  image: ${DRONE_BRANCH}.run
+  pull: never
+  commands:
+  - cd ${DRONE_BRANCH}
+  - if [ -f ./solution.sh ]; then chmod +x solution.sh ; ./solution.sh ; fi
+  - tar -xvf myTestRepo.tar
+  - chmod +x ../src/check.sh
+  - bash ../src/check.sh
+
+volumes:
+- name: dockersock
+  host:
+    path: /var/run/docker.sock
 
 trigger:
   branch:
-  - master
   - feature*
