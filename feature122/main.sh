@@ -1,2 +1,3 @@
 #!/bin/bash
-awk 'NR % 2 == 0 {print $7}'
+
+awk '{print $7}' | awk 'NR % 1 == 0'
