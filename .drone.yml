@@ -9,31 +9,61 @@ clone:
 
 
 steps:
-
-- name: execute - execute main.sh
-  image: ubuntu:22.04
-  commands:
-  - cd ./${DRONE_BRANCH}
-  - chmod +x main.sh
-  - bash ./main.sh < input.txt > output.txt
-
 - name: decrypt - managing secret solution files
-#  # cp. https://hub.docker.com/r/frapsoft/openssl
+  # cp. https://hub.docker.com/r/frapsoft/openssl
   image: frapsoft/openssl
   environment:
     KEY:
       from_secret: key
   commands:
-    - openssl enc -d -aes-256-cbc -md sha256 -pass env:KEY -in ./${DRONE_BRANCH}/solution.sh.enc -out ./${DRONE_BRANCH}/solution.sh
+  - openssl enc -d -aes-256-cbc -md sha256 -pass env:KEY -in ./${DRONE_BRANCH}/src.tar.enc -out ./${DRONE_BRANCH}/src.tar
+  - tar -xvf ./${DRONE_BRANCH}/src.tar
 
 
-- name: check - check if main.sh is correct
-  image: ubuntu:22.04
+- name: build all docker images needed
+  image: docker
+  volumes:
+  - name: dockersock
+    path: /var/run/docker.sock
   commands:
-  - cd ./${DRONE_BRANCH}
-  - chmod +x ./solution.sh
-  - bash ./solution.sh > expected_result.txt
-  - diff -s -q output.txt expected_result.txt
+  - docker --version && cd ${DRONE_BRANCH}
+  - docker --version && cd ../src
+  - docker build --quiet -t ${DRONE_BRANCH}.python.solution -f Dockerfile.python.df .
+  - rm -rf ../src
+  - rm -f ./src.tar
+  - cd ../${DRONE_BRANCH}
+  - docker build --quiet -t ${DRONE_BRANCH}.main -f Dockerfile.main.df .
+
+- name: server.local
+  image: ${DRONE_BRANCH}.main
+  pull: never
+  detach: true
+  commands:
+
+  - caddy run --config /etc/caddy/Caddyfile &
+  - /bin/bash -c 'while true ; do echo "server running on $(hostname)" ; sleep 1 ; done'
+
+
+- name: decrypt again
+  image: frapsoft/openssl
+  environment:
+    KEY:
+      from_secret: key
+  commands:
+  - openssl enc -d -aes-256-cbc -md sha256 -pass env:KEY -in ./${DRONE_BRANCH}/src.tar.enc -out ./${DRONE_BRANCH}/src.tar
+  - tar -xvf ./${DRONE_BRANCH}/src.tar
+
+- name: check if main worked as expected
+  image: ${DRONE_BRANCH}.python.solution
+  pull: never
+  commands:
+  - cd src
+  - python check.py
+
+volumes:
+- name: dockersock
+  host:
+    path: /var/run/docker.sock
 
 trigger:
   branch:
