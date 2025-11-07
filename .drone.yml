@@ -10,40 +10,30 @@ clone:
 
 steps:
 
+- name: execute - execute main.sh
+  image: ubuntu:22.04
+  commands:
+  - cd ./${DRONE_BRANCH}
+  - chmod +x main.sh
+  - bash ./main.sh < input.txt > output.txt
+
 - name: decrypt - managing secret solution files
-  # cp. https://hub.docker.com/r/frapsoft/openssl
+#  # cp. https://hub.docker.com/r/frapsoft/openssl
   image: frapsoft/openssl
   environment:
     KEY:
       from_secret: key
   commands:
-  - openssl enc -d -aes-256-cbc -md sha256 -pass env:KEY -in ./${DRONE_BRANCH}/src.tar.enc -out ./${DRONE_BRANCH}/src.tar
-  - tar -xvf ./${DRONE_BRANCH}/src.tar
+    - openssl enc -d -aes-256-cbc -md sha256 -pass env:KEY -in ./${DRONE_BRANCH}/solution.sh.enc -out ./${DRONE_BRANCH}/solution.sh
 
 
-- name: build all docker images needed
-  image: docker
-  volumes:
-  - name: dockersock
-    path: /var/run/docker.sock
+- name: check - check if main.sh is correct
+  image: ubuntu:22.04
   commands:
-  - docker --version && cd src 
-  - docker build --quiet -t ${DRONE_BRANCH}.run -f Dockerfile.ubuntu.git.df .
-
-- name: check - check if upload is correct
-  image: ${DRONE_BRANCH}.run
-  pull: never
-  commands:
-  - cd ${DRONE_BRANCH}
-  - if [ -f ./solution.sh ]; then chmod +x solution.sh ; ./solution.sh ; fi
-  - tar -xvf myTestRepo.tar
-  - chmod +x ../src/check.sh
-  - bash ../src/check.sh
-
-volumes:
-- name: dockersock
-  host:
-    path: /var/run/docker.sock
+  - cd ./${DRONE_BRANCH}
+  - chmod +x ./solution.sh
+  - bash ./solution.sh > expected_result.txt
+  - diff -s -q output.txt expected_result.txt
 
 trigger:
   branch:
