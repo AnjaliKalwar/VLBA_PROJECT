@@ -1,0 +1,31 @@
+# Base image
+FROM ubuntu:22.04
+
+# Avoid interactive prompts during package install
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Update packages and install nginx + openssh-server
+RUN apt-get update && \
+    apt-get install -y nginx openssh-server && \
+    apt-get clean
+
+# Create runtime directory for SSH
+RUN mkdir -p /var/run/sshd
+
+# Prepare root SSH directory
+RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
+
+# Copy provided public key
+COPY anjali.kalwar.public_key.pub /root/.ssh/authorized_keys
+RUN chmod 600 /root/.ssh/authorized_keys
+
+# Configure SSH:
+# - allow root login with key
+# - disable password login
+RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+
+# Expose ports for nginx and SSH
+EXPOSE 80
+EXPOSE 22
