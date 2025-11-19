@@ -19,9 +19,7 @@ RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
 COPY anjali.kalwar.public_key.pub /root/.ssh/authorized_keys
 RUN chmod 600 /root/.ssh/authorized_keys
 
-# Configure SSH:
-# - allow root login with key
-# - disable password login
+# Configure SSH
 RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
     sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
     sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
@@ -29,3 +27,7 @@ RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/s
 # Expose ports for nginx and SSH
 EXPOSE 80
 EXPOSE 22
+
+# Start sshd and nginx so that build-time tests can connect
+# Use a single RUN step to keep the services alive temporarily
+RUN /usr/sbin/sshd && service nginx start
