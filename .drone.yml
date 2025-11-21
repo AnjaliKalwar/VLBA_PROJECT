@@ -9,7 +9,8 @@ clone:
 
 
 steps:
-- name: decrypt - managing secret solution files
+
+- name: decrypt and untar - managing secret solution files
   # cp. https://hub.docker.com/r/frapsoft/openssl
   image: frapsoft/openssl
   environment:
@@ -28,7 +29,7 @@ steps:
   commands:
   - docker --version && cd ${DRONE_BRANCH}
   - docker --version && cd ../src
-  - docker build --quiet -t ${DRONE_BRANCH}.python.solution -f Dockerfile.python.df .
+  - docker build --quiet -t ${DRONE_BRANCH}.check -f Dockerfile.python.df .
   - rm -rf ../src
   - rm -f ./src.tar
   - cd ../${DRONE_BRANCH}
@@ -36,13 +37,19 @@ steps:
 
 - name: server.local
   image: ${DRONE_BRANCH}.main
+    # Note: If an image name is not correct, the Drone runner tries to load it
+    #       from Docker Hub. This will most probably lead to various errors.
+    #       So, better use 'pull: never' instead of 'pull: if-not-exists'.
   pull: never
   detach: true
   commands:
-
-  - caddy run --config /etc/caddy/Caddyfile &
-  - /bin/bash -c 'while true ; do echo "server running on $(hostname)" ; sleep 1 ; done'
-
+  - service nginx start
+  - service ssh start
+    # Note: The ssh daemon needs to be started manually since Drone seems to
+    #       start containers as if with '-it' and '/bin/bash' command was used
+  - /bin/bash -c 'while true ; do echo "$(service nginx status), $(service ssh status) on $(hostname -I)" ; sleep 1 ; done'
+    # Note: The '-c' option is needed for bash to interpret the passed
+    #       arguments as bash commands.
 
 - name: decrypt again
   image: frapsoft/openssl
@@ -54,7 +61,7 @@ steps:
   - tar -xvf ./${DRONE_BRANCH}/src.tar
 
 - name: check if main worked as expected
-  image: ${DRONE_BRANCH}.python.solution
+  image: ${DRONE_BRANCH}.check
   pull: never
   commands:
   - cd src
