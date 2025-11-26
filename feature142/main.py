@@ -1,20 +1,22 @@
-# Open and read the input file
-with open("input.txt", "r") as f:
-    data = f.readlines()
+def main():
+    rows = []
+    f = open("input.txt", "r", encoding="utf-8")
+    for line in f:
+        line = line.rstrip("\n")
+        if "n" in line or not line:
+            continue
+        cols = line.split("\t")
+        count = len(cols)
+        if count > 7:
+            del cols[7]
+        rows.append((count, cols))
+    f.close()
 
-# Remove lines containing 'n'
-filtered_data = [line.strip() for line in data if 'n' not in line]
+    rows.sort(key=lambda x: x[0])
 
-processed_data = []
-for line in filtered_data:
-    columns = line.split('\t')
-    if len(columns) >= 8:
-        columns.pop(7) 
-    word_count = len(columns)
-    processed_data.append((word_count, '\t'.join(columns)))
+    for count, cols in rows:
+        print(f"{count}:" + "\t".join(cols))
 
-# Step 3: Sort lines by word count (ascending)
-processed_data.sort(key=lambda x: x[0])
 
-for word_count, line in processed_data:
-    print(f"{word_count}:{line}")
+if __name__ == "__main__":
+    main()
