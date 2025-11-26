@@ -1,22 +1,28 @@
-def main():
-    rows = []
-    f = open("input.txt", "r", encoding="utf-8")
-    for line in f:
-        line = line.rstrip("\n")
-        if "n" in line or not line:
-            continue
-        cols = line.split("\t")
-        count = len(cols)
-        if count > 7:
-            del cols[7]
-        rows.append((count, cols))
-    f.close()
+# Open input file
+with open("input.txt", "r") as f:
+    lines = f.readlines()
 
-    rows.sort(key=lambda x: x[0])
+# Filter lines that do NOT contain 'n'
+filtered_lines = []
+for line in lines:
+    line = line.rstrip("\n")  # remove only newline
+    if 'n' not in line:
+        filtered_lines.append(line)
 
-    for count, cols in rows:
-        print(f"{count}:" + "\t".join(cols))
+# Process lines: remove 8th column if exists, count words
+processed_lines = []
+for line in filtered_lines:
+    columns = line.split('\t')
+    if len(columns) >= 8:
+        columns.pop(7)  # remove 8th column
+    word_count = len(columns)
+    processed_lines.append((word_count, columns))
 
+# Sort by number of words (stable sort)
+processed_lines.sort(key=lambda x: x[0])
 
-if __name__ == "__main__":
-    main()
+# Print in required format
+for word_count, columns in processed_lines:
+    # print(f"{word_count}:{'\t'.join(columns)}")
+    print(f"{word_count}:" + "\t".join(columns))
+
