@@ -25,5 +25,6 @@ processed_lines.sort(key=lambda x: x[1])
 
 # Print in required format
 for word_count, columns in processed_lines:
-    print(f"{word_count}:" + "\t".join(columns))
+    # print(f"{word_count}:" + "\t".join(columns))
+    print(f"{word_count}:" + "\t".join(columns) + "\t")
 
