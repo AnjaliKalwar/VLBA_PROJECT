@@ -12,9 +12,9 @@ for line in lines:
 processed_lines = []
 for line in filtered_lines:
     columns = line.split()
+    word_count = len(columns)
     if len(columns) >= 8:
         columns.pop(7)  # removing 8th column
-    word_count = len(columns)
     processed_lines.append((word_count, columns))
 
 # Sort by number of words (stable sort)
