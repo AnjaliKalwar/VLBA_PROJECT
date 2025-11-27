@@ -20,7 +20,7 @@ for line in filtered_lines:
 # Sort by number of words (stable sort)
 # print(processed_lines)
 # print("-------")
-processed_lines.sort(key=lambda x: x[0])
+processed_lines.sort(key=lambda x: x[1])
 # print(processed_lines)
 
 # Print in required format
