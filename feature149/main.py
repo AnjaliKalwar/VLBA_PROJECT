@@ -5,8 +5,8 @@ import os
 # -----------------------------
 # CONFIGURATION
 # -----------------------------
-HOST = "localhost"         # Use Docker-mapped host
-PORT = 2222                # Mapped container SSH port
+HOST = "server.local"      # Use the hostname expected by tests
+PORT = 22                  # Standard SSH port
 USER = "admin"
 PASSWORD = "admin"
 PUBLIC_KEY_FILE = "public_key.pub"  # Path to public key
