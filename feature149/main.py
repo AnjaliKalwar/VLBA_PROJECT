@@ -10,12 +10,12 @@ PORT = 22
 USER = "admin"
 PUBKEY_FILE = "public_key.pub"
 PRIVATE_KEY_FILE = "private_key.pem"
-PASSWORD = "admin"  # needed only for sudo
+PASSWORD = "admin"  # for sudo
 
 # -----------------------------
 # HELPER FUNCTIONS
 # -----------------------------
-def wait_until_ssh_ready(ssh):
+def wait_for_ssh(ssh):
     for _ in range(15):
         try:
             ssh.exec_command("echo ok")
@@ -25,14 +25,26 @@ def wait_until_ssh_ready(ssh):
     return False
 
 
-def run_command(ssh, command, use_sudo=False):
-    if use_sudo:
-        command = f"sudo -S bash -c '{command}'"
-    stdin, stdout, stderr = ssh.exec_command(command, get_pty=True)
-    if use_sudo:
-        stdin.write(PASSWORD + "\n")
-        stdin.flush()
-    return stdout.read().decode(), stderr.read().decode()
+def run_sudo(ssh, cmd):
+    """Execute a sudo command interactively, send password if prompted."""
+    transport = ssh.get_transport()
+    channel = transport.open_session()
+    channel.get_pty()
+    channel.exec_command(cmd)
+
+    password_sent = False
+    output = ""
+    while not channel.exit_status_ready():
+        time.sleep(0.1)
+        if channel.recv_ready():
+            data = channel.recv(1024).decode()
+            output += data
+            if "password" in data.lower() and not password_sent:
+                channel.send(PASSWORD + "\n")
+                password_sent = True
+        if channel.recv_stderr_ready():
+            output += channel.recv_stderr(1024).decode()
+    return output
 
 
 # -----------------------------
@@ -43,7 +55,6 @@ def main():
     if not os.path.exists(PUBKEY_FILE):
         print(f"[!] Public key '{PUBKEY_FILE}' not found")
         return
-
     pubkey = open(PUBKEY_FILE).read().strip()
     if not pubkey.startswith("ssh-"):
         pubkey = "ssh-rsa " + pubkey
@@ -52,44 +63,32 @@ def main():
     if not os.path.exists(PRIVATE_KEY_FILE):
         print(f"[!] Private key '{PRIVATE_KEY_FILE}' not found")
         return
-
     key = paramiko.RSAKey.from_private_key_file(PRIVATE_KEY_FILE)
-
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-    print("[+] Connecting via private key...")
     try:
-        ssh.connect(
-            HOST,
-            port=PORT,
-            username=USER,
-            pkey=key,
-            look_for_keys=False,
-            allow_agent=False
-        )
+        ssh.connect(HOST, port=PORT, username=USER, pkey=key, look_for_keys=False, allow_agent=False)
     except Exception as e:
         print(f"[!] SSH connection failed: {e}")
         return
 
-    wait_until_ssh_ready(ssh)
+    wait_for_ssh(ssh)
 
-    # 3. Install SSH public key (ensures future key-based login)
-    print("[+] Installing SSH public key...")
+    # 3. Upload public key
     commands = [
         "mkdir -p ~/.ssh",
         "chmod 700 ~/.ssh",
         f'echo "{pubkey}" > ~/.ssh/authorized_keys',
         "chmod 600 ~/.ssh/authorized_keys"
     ]
-    for cmd in commands:
-        run_command(ssh, cmd)
+    for c in commands:
+        ssh.exec_command(c)
+        time.sleep(0.2)
 
-    # 4. Enable passwordless sudo
-    print("[+] Enabling passwordless sudo...")
-    sudoers_content = "admin ALL=(ALL) NOPASSWD:ALL\n"
-    run_command(ssh, f'echo "{sudoers_content}" | sudo tee /etc/sudoers.d/admin_nopasswd > /dev/null', use_sudo=True)
-    run_command(ssh, "sudo chmod 440 /etc/sudoers.d/admin_nopasswd", use_sudo=True)
+    # 4. Enable passwordless sudo (interactive)
+    sudoers_line = "admin ALL=(ALL) NOPASSWD:ALL\n"
+    run_sudo(ssh, f'echo "{sudoers_line}" | sudo tee /etc/sudoers.d/admin_nopasswd > /dev/null')
+    run_sudo(ssh, "sudo chmod 440 /etc/sudoers.d/admin_nopasswd")
 
     print("[✓] Passwordless sudo enabled.")
     ssh.close()
