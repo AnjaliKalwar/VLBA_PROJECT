@@ -78,6 +78,7 @@ def main():
 
     print("[✓] SSH key installed and password login disabled.")
     ssh.close()
+    
 
 
 # -----------------------------
