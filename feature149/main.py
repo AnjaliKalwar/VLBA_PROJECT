@@ -17,13 +17,27 @@ PUBLIC_KEY_FILE = "public_key.pub"
 # -----------------------------
 def wait_for_ssh(ssh):
     """Wait until SSH is ready."""
-    for _ in range(15):
+    for i in range(15):
         try:
             ssh.exec_command("echo ok")
+            print(f"[DEBUG] SSH ready after {i+1} attempts")
             return True
-        except:
+        except Exception as e:
+            print(f"[DEBUG] SSH not ready yet ({i+1}/15): {e}")
             time.sleep(1)
     return False
+
+def run_command(ssh, cmd, debug=True):
+    """Run a command and print output for debugging."""
+    if debug:
+        print(f"[DEBUG] Running: {cmd}")
+    stdin, stdout, stderr = ssh.exec_command(cmd)
+    out = stdout.read().decode()
+    err = stderr.read().decode()
+    if debug:
+        print(f"[DEBUG] stdout: {out.strip()}")
+        print(f"[DEBUG] stderr: {err.strip()}")
+    return out, err
 
 # -----------------------------
 # MAIN SCRIPT
@@ -63,23 +77,26 @@ def main():
         "chmod 600 ~/.ssh/authorized_keys"
     ]
     for cmd in cmds:
-        ssh.exec_command(cmd)
-        time.sleep(0.2)
+        run_command(ssh, cmd)
 
     # 4. Disable password authentication in SSH
     print("[+] Disabling password SSH login...")
-    ssh.exec_command("sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak")
-    ssh.exec_command('sudo sed -i "s/^PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config')
-    ssh.exec_command('sudo sed -i "s/^#PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config')
+    # These commands require sudo
+    cmds_sudo = [
+        "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak",
+        'sed -i "s/^PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config',
+        'sed -i "s/^#PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config',
+        "systemctl reload sshd || service ssh restart"
+    ]
+    for cmd in cmds_sudo:
+        out, err = run_command(ssh, f"sudo {cmd}")
+        if "sudo: a password is required" in err.lower():
+            print("[ERROR] Sudo failed. This is expected if admin does not have passwordless sudo.")
+            print("[INFO] Passwordless sudo must be configured in the Dockerfile before running this script.")
+            break
 
-    # 5. Reload SSH
-    ssh.exec_command("sudo systemctl reload sshd || sudo service ssh restart")
-    time.sleep(1)
-    
-
-    print("[✓] SSH key installed and password login disabled.")
+    print("[✓] SSH key installed. Password login may not be disabled if sudo failed.")
     ssh.close()
-    
 
 
 # -----------------------------
