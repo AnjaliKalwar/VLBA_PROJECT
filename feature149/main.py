@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import paramiko
 import time
 import os
@@ -8,14 +9,14 @@ import os
 HOST = "server.local"
 PORT = 22
 USER = "admin"
-PUBKEY_FILE = "public_key.pub"
-PRIVATE_KEY_FILE = "private_key.pem"
-PASSWORD = "admin"  # for sudo
+PASSWORD = "admin"
+PUBLIC_KEY_FILE = "public_key.pub"
 
 # -----------------------------
-# HELPER FUNCTIONS
+# HELPERS
 # -----------------------------
 def wait_for_ssh(ssh):
+    """Wait until SSH is ready."""
     for _ in range(15):
         try:
             ssh.exec_command("echo ok")
@@ -24,73 +25,58 @@ def wait_for_ssh(ssh):
             time.sleep(1)
     return False
 
-
-def run_sudo(ssh, cmd):
-    """Execute a sudo command interactively, send password if prompted."""
-    transport = ssh.get_transport()
-    channel = transport.open_session()
-    channel.get_pty()
-    channel.exec_command(cmd)
-
-    password_sent = False
-    output = ""
-    while not channel.exit_status_ready():
-        time.sleep(0.1)
-        if channel.recv_ready():
-            data = channel.recv(1024).decode()
-            output += data
-            if "password" in data.lower() and not password_sent:
-                channel.send(PASSWORD + "\n")
-                password_sent = True
-        if channel.recv_stderr_ready():
-            output += channel.recv_stderr(1024).decode()
-    return output
-
-
 # -----------------------------
 # MAIN SCRIPT
 # -----------------------------
 def main():
-    # 1. Read public key
-    if not os.path.exists(PUBKEY_FILE):
-        print(f"[!] Public key '{PUBKEY_FILE}' not found")
+    # 1. Load public key
+    if not os.path.exists(PUBLIC_KEY_FILE):
+        print(f"[!] Public key file '{PUBLIC_KEY_FILE}' not found")
         return
-    pubkey = open(PUBKEY_FILE).read().strip()
-    if not pubkey.startswith("ssh-"):
-        pubkey = "ssh-rsa " + pubkey
 
-    # 2. Connect via private key
-    if not os.path.exists(PRIVATE_KEY_FILE):
-        print(f"[!] Private key '{PRIVATE_KEY_FILE}' not found")
-        return
-    key = paramiko.RSAKey.from_private_key_file(PRIVATE_KEY_FILE)
+    with open(PUBLIC_KEY_FILE, "r") as f:
+        public_key = f.read().strip()
+
+    if not public_key.startswith("ssh-"):
+        public_key = "ssh-rsa " + public_key
+
+    # 2. Connect via password
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    print("[+] Connecting to server...")
     try:
-        ssh.connect(HOST, port=PORT, username=USER, pkey=key, look_for_keys=False, allow_agent=False)
+        ssh.connect(HOST, port=PORT, username=USER, password=PASSWORD,
+                    look_for_keys=False, allow_agent=False)
     except Exception as e:
         print(f"[!] SSH connection failed: {e}")
         return
 
     wait_for_ssh(ssh)
 
-    # 3. Upload public key
-    commands = [
+    # 3. Install public key
+    print("[+] Installing SSH key...")
+    cmds = [
         "mkdir -p ~/.ssh",
         "chmod 700 ~/.ssh",
-        f'echo "{pubkey}" > ~/.ssh/authorized_keys',
+        f'echo "{public_key}" > ~/.ssh/authorized_keys',
         "chmod 600 ~/.ssh/authorized_keys"
     ]
-    for c in commands:
-        ssh.exec_command(c)
+    for cmd in cmds:
+        ssh.exec_command(cmd)
         time.sleep(0.2)
 
-    # 4. Enable passwordless sudo (interactive)
-    sudoers_line = "admin ALL=(ALL) NOPASSWD:ALL\n"
-    run_sudo(ssh, f'echo "{sudoers_line}" | sudo tee /etc/sudoers.d/admin_nopasswd > /dev/null')
-    run_sudo(ssh, "sudo chmod 440 /etc/sudoers.d/admin_nopasswd")
+    # 4. Disable password authentication in SSH
+    print("[+] Disabling password SSH login...")
+    ssh.exec_command("sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak")
+    ssh.exec_command('sudo sed -i "s/^PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config')
+    ssh.exec_command('sudo sed -i "s/^#PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config')
 
-    print("[✓] Passwordless sudo enabled.")
+    # 5. Reload SSH
+    ssh.exec_command("sudo systemctl reload sshd || sudo service ssh restart")
+    time.sleep(1)
+
+    print("[✓] SSH key installed and password login disabled.")
     ssh.close()
 
 
