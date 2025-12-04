@@ -75,6 +75,7 @@ def main():
     # 5. Reload SSH
     ssh.exec_command("sudo systemctl reload sshd || sudo service ssh restart")
     time.sleep(1)
+    
 
     print("[✓] SSH key installed and password login disabled.")
     ssh.close()
