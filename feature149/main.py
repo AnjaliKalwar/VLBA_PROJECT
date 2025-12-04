@@ -1,103 +1,102 @@
-#!/usr/bin/env python3
 import paramiko
 import time
 import os
 
 # -----------------------------
-# CONFIG
+# CONFIGURATION
 # -----------------------------
 HOST = "server.local"
 PORT = 22
 USER = "admin"
-PASSWORD = "admin"
-PUBLIC_KEY_FILE = "public_key.pub"
+PUBKEY_FILE = "public_key.pub"
+PRIVATE_KEY_FILE = "private_key.pem"
+PASSWORD = "admin"  # needed only for sudo
 
 # -----------------------------
-# HELPERS
+# HELPER FUNCTIONS
 # -----------------------------
-def sudo(ssh, cmd):
-    """
-    Run a sudo command non-interactively by sending password using -S.
-    This FIXES the 'sudo: a terminal is required' error.
-    """
-    full = f'echo "{PASSWORD}" | sudo -S sh -c "{cmd}"'
-    stdin, stdout, stderr = ssh.exec_command(full)
-    time.sleep(0.25)
-    return stdout.read(), stderr.read()
-
-
-def wait_for_server(ssh):
-    for _ in range(20):
+def wait_until_ssh_ready(ssh):
+    for _ in range(15):
         try:
             ssh.exec_command("echo ok")
-            return
-        except Exception:
+            return True
+        except:
             time.sleep(1)
+    return False
+
+
+def run_command(ssh, command, use_sudo=False):
+    if use_sudo:
+        command = f"sudo -S bash -c '{command}'"
+    stdin, stdout, stderr = ssh.exec_command(command, get_pty=True)
+    if use_sudo:
+        stdin.write(PASSWORD + "\n")
+        stdin.flush()
+    return stdout.read().decode(), stderr.read().decode()
+
 
 # -----------------------------
-# MAIN
+# MAIN SCRIPT
 # -----------------------------
 def main():
-    # 1. Validate key presence
-    if not os.path.exists(PUBLIC_KEY_FILE):
-        print(f"[!] Missing key: {PUBLIC_KEY_FILE}")
+    # 1. Read public key
+    if not os.path.exists(PUBKEY_FILE):
+        print(f"[!] Public key '{PUBKEY_FILE}' not found")
         return
 
-    with open(PUBLIC_KEY_FILE, "r") as f:
-        public_key = f.read().strip()
+    pubkey = open(PUBKEY_FILE).read().strip()
+    if not pubkey.startswith("ssh-"):
+        pubkey = "ssh-rsa " + pubkey
 
-    # Ensure correct prefix
-    if not public_key.startswith("ssh-"):
-        public_key = "ssh-rsa " + public_key
+    # 2. Connect via private key
+    if not os.path.exists(PRIVATE_KEY_FILE):
+        print(f"[!] Private key '{PRIVATE_KEY_FILE}' not found")
+        return
 
-    # 2. SSH login (password)
-    print("[+] Connecting to server...")
+    key = paramiko.RSAKey.from_private_key_file(PRIVATE_KEY_FILE)
+
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-    ssh.connect(
-        HOST, port=PORT,
-        username=USER,
-        password=PASSWORD,
-        look_for_keys=False,
-        allow_agent=False
-    )
-    wait_for_server(ssh)
+    print("[+] Connecting via private key...")
+    try:
+        ssh.connect(
+            HOST,
+            port=PORT,
+            username=USER,
+            pkey=key,
+            look_for_keys=False,
+            allow_agent=False
+        )
+    except Exception as e:
+        print(f"[!] SSH connection failed: {e}")
+        return
 
-    # 3. Install authorized_keys
-    print("[+] Installing SSH key...")
-    cmds = [
+    wait_until_ssh_ready(ssh)
+
+    # 3. Install SSH public key (ensures future key-based login)
+    print("[+] Installing SSH public key...")
+    commands = [
         "mkdir -p ~/.ssh",
         "chmod 700 ~/.ssh",
-        f'echo "{public_key}" > ~/.ssh/authorized_keys',
-        "chmod 600 ~/.ssh/authorized_keys",
+        f'echo "{pubkey}" > ~/.ssh/authorized_keys',
+        "chmod 600 ~/.ssh/authorized_keys"
     ]
-    for c in cmds:
-        ssh.exec_command(c)
-        time.sleep(0.15)
+    for cmd in commands:
+        run_command(ssh, cmd)
 
-    # 4. Passwordless sudo
-    print("[+] Setting passwordless sudo...")
+    # 4. Enable passwordless sudo
+    print("[+] Enabling passwordless sudo...")
+    sudoers_content = "admin ALL=(ALL) NOPASSWD:ALL\n"
+    run_command(ssh, f'echo "{sudoers_content}" | sudo tee /etc/sudoers.d/admin_nopasswd > /dev/null', use_sudo=True)
+    run_command(ssh, "sudo chmod 440 /etc/sudoers.d/admin_nopasswd", use_sudo=True)
 
-    sudo(ssh, 'echo "admin ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/admin')
-    sudo(ssh, "chmod 440 /etc/sudoers.d/admin")
-
-    # 5. Disable password-based SSH login
-    print("[+] Disabling password SSH login...")
-
-    sudo(ssh, "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak")
-
-    sudo(ssh, 'sed -i "s/^PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config')
-    sudo(ssh, 'sed -i "s/^#PasswordAuthentication.*/PasswordAuthentication no/" /etc/ssh/sshd_config')
-
-    # 6. Restart SSH
-    print("[+] Restarting SSH daemon...")
-    sudo(ssh, "systemctl reload sshd || service ssh restart")
-
-    print("\n[✓] ALL DONE — passwordless sudo + key auth enabled.\n")
-
+    print("[✓] Passwordless sudo enabled.")
     ssh.close()
 
 
+# -----------------------------
+# RUN SCRIPT
+# -----------------------------
 if __name__ == "__main__":
     main()
