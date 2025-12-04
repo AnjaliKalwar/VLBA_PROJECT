@@ -1,19 +1,19 @@
-#!/usr/bin/env python3
-"""
-Exercise 149 – setup SSH key auth, passwordless sudo, and disable SSH password logins.
-"""
-
 import paramiko
 import os
 import time
 
+# -----------------------------
+# CONFIGURATION
+# -----------------------------
 HOST = "server.local"
 PORT = 22
 USER = "admin"
 PASSWORD = "admin"
 PUBLIC_KEY_FILE = "public_key.pub"
 
-
+# -----------------------------
+# HELPER FUNCTIONS
+# -----------------------------
 def wait_for_server(ssh, retries=10, delay=1.0):
     """Wait until remote side is ready to execute commands."""
     for _ in range(retries):
@@ -23,7 +23,19 @@ def wait_for_server(ssh, retries=10, delay=1.0):
         except Exception:
             time.sleep(delay)
 
+def run_sudo_command(ssh, command):
+    """
+    Run a sudo command over a real PTY session.
+    Ensures it works on systems requiring a TTY.
+    """
+    chan = ssh.get_transport().open_session()
+    chan.get_pty()
+    chan.exec_command(command)
+    return chan.recv_exit_status()
 
+# -----------------------------
+# MAIN FUNCTION
+# -----------------------------
 def main():
     # 1. Load public key
     if not os.path.exists(PUBLIC_KEY_FILE):
@@ -33,7 +45,7 @@ def main():
     with open(PUBLIC_KEY_FILE, "r") as f:
         raw_key = f.read().strip()
 
-    # ensure proper OpenSSH prefix
+    # Ensure proper OpenSSH prefix
     if not raw_key.startswith("ssh-rsa "):
         public_key = "ssh-rsa " + raw_key
     else:
@@ -42,7 +54,6 @@ def main():
     # 2. Connect using password
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
     print("[+] Connecting to server via password ...")
     ssh.connect(
         HOST,
@@ -50,7 +61,7 @@ def main():
         username=USER,
         password=PASSWORD,
         look_for_keys=False,
-        allow_agent=False,
+        allow_agent=False
     )
 
     wait_for_server(ssh)
@@ -67,65 +78,35 @@ def main():
         ssh.exec_command(cmd)
         time.sleep(0.2)
 
-    # 4. Enable passwordless sudo (all sudo commands must use a PTY)
+    # 4. Enable passwordless sudo
     print("[+] Enabling passwordless sudo ...")
-
     sudo_content = 'admin ALL=(ALL) NOPASSWD:ALL\n'
-
-    # Create sudoers snippet with PTY so sudo does not complain
-    chan = ssh.get_transport().open_session()
-    chan.get_pty()
-    chan.exec_command(
-        f'echo "{sudo_content}" | sudo tee /etc/sudoers.d/admin_nopasswd >/dev/null'
-    )
-    chan.recv_exit_status()
-
-    # Fix permissions and ownership WITH PTY (440, root:root)
-    chan = ssh.get_transport().open_session()
-    chan.get_pty()
-    chan.exec_command("sudo chmod 440 /etc/sudoers.d/admin_nopasswd")
-    chan.recv_exit_status()
-
-    chan = ssh.get_transport().open_session()
-    chan.get_pty()
-    chan.exec_command("sudo chown root:root /etc/sudoers.d/admin_nopasswd")
-    chan.recv_exit_status()
+    run_sudo_command(ssh, f'echo "{sudo_content}" | sudo tee /etc/sudoers.d/admin_nopasswd >/dev/null')
+    run_sudo_command(ssh, "sudo chmod 440 /etc/sudoers.d/admin_nopasswd")
+    run_sudo_command(ssh, "sudo chown root:root /etc/sudoers.d/admin_nopasswd")
 
     # 5. Disable password authentication in SSH
     print("[+] Disabling SSH password authentication ...")
-
-    # backup config
-    chan = ssh.get_transport().open_session()
-    chan.get_pty()
-    chan.exec_command(
-        "sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak"
+    run_sudo_command(ssh, "sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak")
+    run_sudo_command(
+        ssh,
+        'sudo sed -i "s/^PasswordAuthentication[[:space:]]\\+yes/PasswordAuthentication no/;'
+        's/^#PasswordAuthentication[[:space:]]\\+yes/PasswordAuthentication no/" /etc/ssh/sshd_config'
     )
-    chan.recv_exit_status()
-
-    # turn PasswordAuthentication to no (handles commented and uncommented)
-    chan = ssh.get_transport().open_session()
-    chan.get_pty()
-    chan.exec_command(
-        'sudo sed -i '
-        '"s/^PasswordAuthentication[[:space:]]\\+yes/PasswordAuthentication no/;'
-        's/^#PasswordAuthentication[[:space:]]\\+yes/PasswordAuthentication no/" '
-        '/etc/ssh/sshd_config'
-    )
-    chan.recv_exit_status()
 
     # 6. Reload SSH service
     print("[+] Reloading SSH service ...")
-    chan = ssh.get_transport().open_session()
-    chan.get_pty()
-    chan.exec_command(
+    run_sudo_command(
+        ssh,
         "sudo systemctl reload sshd || sudo systemctl reload ssh || "
         "sudo service ssh reload || sudo service ssh restart"
     )
-    chan.recv_exit_status()
 
     print("[✓] Setup completed successfully.")
     ssh.close()
 
-
+# -----------------------------
+# RUN SCRIPT
+# -----------------------------
 if __name__ == "__main__":
     main()
