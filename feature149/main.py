@@ -5,8 +5,8 @@ import os
 # -----------------------------
 # CONFIGURATION
 # -----------------------------
-HOST = "server.local"      # Use the hostname expected by tests
-PORT = 22                  # Standard SSH port
+HOST = "server.local"      # Expected hostname
+PORT = 22                  # SSH port
 USER = "admin"
 PASSWORD = "admin"
 PUBLIC_KEY_FILE = "public_key.pub"  # Path to public key
@@ -15,7 +15,7 @@ PUBLIC_KEY_FILE = "public_key.pub"  # Path to public key
 # HELPER FUNCTIONS
 # -----------------------------
 def wait_for_server(ssh):
-    """Wait a moment if SSH service is not ready."""
+    """Wait for SSH server to be ready."""
     for _ in range(10):
         try:
             ssh.exec_command("echo ok")
@@ -35,7 +35,7 @@ def main():
     with open(PUBLIC_KEY_FILE, "r") as f:
         raw_key = f.read().strip()
 
-    # Ensure proper SSH public key format
+    # Ensure proper "ssh-rsa ..." format
     if not raw_key.startswith("ssh-rsa "):
         public_key = "ssh-rsa " + raw_key
     else:
@@ -61,7 +61,7 @@ def main():
 
     wait_for_server(ssh)
 
-    # 3. Create .ssh folder and upload public key
+    # 3. Install public key
     print("[+] Installing public key ...")
     commands = [
         "mkdir -p ~/.ssh",
@@ -74,32 +74,39 @@ def main():
         ssh.exec_command(cmd)
         time.sleep(0.2)
 
-    # 4. Enable passwordless sudo for admin
+    # 4. Configure passwordless sudo
     print("[+] Enabling passwordless sudo ...")
-    sudo_rule = "admin ALL=(ALL) NOPASSWD:ALL\n"
-    ssh.exec_command(
-        f'echo "{sudo_rule}" | sudo tee /etc/sudoers.d/admin_nopasswd > /dev/null',
-        get_pty=True
-    )
-    time.sleep(0.5)
+
+    sudo_cmds = [
+        # Write sudoers file
+        'echo "admin ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/admin_nopasswd',
+        # Correct permissions
+        'sudo chmod 440 /etc/sudoers.d/admin_nopasswd',
+        # Ensure root ownership
+        'sudo chown root:root /etc/sudoers.d/admin_nopasswd'
+    ]
+
+    for cmd in sudo_cmds:
+        ssh.exec_command(cmd)
+        time.sleep(0.3)
 
     # 5. Disable SSH password login
     print("[+] Disabling password login in SSH ...")
-    ssh.exec_command("sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak", get_pty=True)
+
+    ssh.exec_command("sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak")
     time.sleep(0.3)
+
     ssh.exec_command(
-        'sudo sed -i "s/^PasswordAuthentication yes/PasswordAuthentication no/" /etc/ssh/sshd_config',
-        get_pty=True
+        'sudo sed -i "s/^PasswordAuthentication yes/PasswordAuthentication no/" /etc/ssh/sshd_config'
     )
     ssh.exec_command(
-        'sudo sed -i "s/^#PasswordAuthentication yes/PasswordAuthentication no/" /etc/ssh/sshd_config',
-        get_pty=True
+        'sudo sed -i "s/^#PasswordAuthentication yes/PasswordAuthentication no/" /etc/ssh/sshd_config'
     )
     time.sleep(0.3)
 
-    # 6. Reload SSH
+    # 6. Reload SSH service
     print("[+] Reloading SSH service ...")
-    ssh.exec_command("sudo systemctl reload sshd || sudo service ssh restart", get_pty=True)
+    ssh.exec_command("sudo systemctl reload sshd || sudo service ssh restart")
     time.sleep(1)
 
     print("[✓] Setup completed successfully.")
