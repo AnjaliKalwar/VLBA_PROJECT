@@ -12,8 +12,8 @@ import sys
 # -----------------------------
 # CONFIGURATION
 # -----------------------------
-HOST = "localhost"         # Use Docker-mapped host
-PORT = 2222                # Mapped container SSH port
+HOST = "server.local"         # Use Docker-mapped host
+PORT = 22              # Mapped container SSH port
 USER = "admin"
 PASSWORD = "admin"
 PUBLIC_KEY_FILE = "public_key.pub"  # Path to public key
