@@ -1,0 +1,15 @@
+[main]
+master.local
+
+[balancer]
+node1.local
+
+[web]
+node2.local
+node3.local
+
+[all:vars]
+ansible_user=root
+ansible_connection=ssh
+ansible_ssh_private_key_file=~/.ssh/id_rsa
+ANSIBLE_STDOUT_CALLBACK=debug

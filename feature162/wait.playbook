@@ -1,0 +1,8 @@
+- hosts: balancer:web
+  gather_facts: no
+  tasks:
+    - name: wait until nodes are up
+      wait_for_connection:
+        delay: 1
+        sleep: 1
+        timeout: 20
