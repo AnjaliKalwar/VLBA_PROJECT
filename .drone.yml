@@ -9,13 +9,6 @@ clone:
 
 
 steps:
-
-- name: process main
-  image: python:3.10.4
-  commands:
-  - cd ${DRONE_BRANCH}
-  - python main.py > output.txt
-
 - name: decrypt - managing secret solution files
   # cp. https://hub.docker.com/r/frapsoft/openssl
   image: frapsoft/openssl
@@ -23,15 +16,71 @@ steps:
     KEY:
       from_secret: key
   commands:
-  - openssl enc -d -aes-256-cbc -md sha256 -pass env:KEY -in ./${DRONE_BRANCH}/solution.py.enc -out ./${DRONE_BRANCH}/solution.py
+  - openssl enc -d -aes-256-cbc -md sha256 -pass env:KEY -in ./${DRONE_BRANCH}/src.tar.enc -out ./${DRONE_BRANCH}/src.tar
+  - tar -xvf ./${DRONE_BRANCH}/src.tar
 
 
-- name: check if main is correct
-  image: python:3.10.4
+- name: build all docker images needed
+  image: docker
+  volumes:
+  - name: dockersock
+    path: /var/run/docker.sock
+  commands:
+  - docker --version && cd ${DRONE_BRANCH}
+  - docker build --quiet -t ${DRONE_BRANCH}python.main -f ../src/Dockerfile.python.df .
+  - docker --version && cd ../src
+  - docker build --quiet -t ${DRONE_BRANCH}ubuntu.sshd -f Dockerfile.ubuntu.sshd.df .
+  - docker build --quiet -t ${DRONE_BRANCH}python.solution -f Dockerfile.python.df .
+  - cd ..
+  - rm -rf src
+  - rm -f src.tar
+
+- name: server.local
+  image: ${DRONE_BRANCH}ubuntu.sshd
+  pull: never
+  detach: true
+  commands:
+  - service ssh start
+    # Note: The ssh daemon needs to be started manually since Drone seems to
+    #       start containers as if with '-it' and '/bin/bash' command was used
+  - /bin/bash -c 'while true ; do who -a ; echo "$(service ssh status) on $(hostname -I)" ; sleep 1 ; done'
+    # Note: The '-c' option is needed for bash to interpret the passed
+    #       arguments as bash commands.
+
+- name: run main and generate result
+  image: ${DRONE_BRANCH}python.main
+  pull: never
   commands:
   - cd ${DRONE_BRANCH}
-  - python solution.py > expected_result.txt
-  - diff -s -q output.txt expected_result.txt
+  - python main.py
+
+- name: decrypt again
+  # cp. https://hub.docker.com/r/frapsoft/openssl
+  image: frapsoft/openssl
+  environment:
+    KEY:
+      from_secret: key
+  commands:
+  - openssl enc -d -aes-256-cbc -md sha256 -pass env:KEY -in ./${DRONE_BRANCH}/src.tar.enc -out ./${DRONE_BRANCH}/src.tar
+  - tar -xvf ./${DRONE_BRANCH}/src.tar
+
+
+
+
+- name: check if main worked as expected
+  image: ${DRONE_BRANCH}python.solution
+  pull: never
+  commands:
+  - cd src
+  - cp ../${DRONE_BRANCH}/private_key.pem .
+    # Note: To be able to access the private key it has to
+    # be copied to this folder
+  - python solution.py --check
+
+volumes:
+- name: dockersock
+  host:
+    path: /var/run/docker.sock
 
 trigger:
   branch:
