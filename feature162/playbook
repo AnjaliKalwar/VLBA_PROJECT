@@ -1,135 +1,162 @@
 ---
-# ================================
-# NGINX LOAD BALANCER (node1.local)
-# ================================
-- name: Configure nginx load balancer
-  hosts: balancer
+- name: Configure Nginx Load Balancer
+  hosts: node1.local
   become: yes
-
   tasks:
-    - name: Install nginx
+    - name: Install Nginx [web:3]
       apt:
         name: nginx
         state: present
         update_cache: yes
 
-    - name: Configure nginx with correct ports
+    - name: Set Nginx worker processes to 1 [web:9]
+      lineinfile:
+        path: /etc/nginx/nginx.conf
+        regexp: '^worker_processes '
+        line: 'worker_processes 1;'
+      notify: Restart Nginx
+
+    - name: Remove default Nginx site configuration
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: Restart Nginx
+
+    - name: Configure Load Balancer and Upstream [web:11]
       copy:
-        dest: /etc/nginx/nginx.conf
+        dest: /etc/nginx/conf.d/load-balancer.conf
         content: |
-          user www-data;
-          worker_processes 1;
-          pid /run/nginx.pid;
-          include /etc/nginx/modules-enabled/*.conf;
-
-          events {
-              worker_connections 768;
+          upstream backend {
+              server node2.local:80 weight=3;
+              server node3.local:8080 weight=1;
           }
 
-          http {
-              upstream backend {
-                  server node2.local:80 weight=3;
-                  server node3.local:8080 weight=1;
+          server {
+              listen 80;
+              server_name localhost;
+
+              location / {
+                  proxy_pass http://backend;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
               }
-
-              server {
-                  listen 80 default_server;
-                  listen [::]:80 default_server;
-
-                  location / {
-                      proxy_pass http://backend;
-                      proxy_set_header Host $host;
-                      proxy_set_header X-Real-IP $remote_addr;
-                  }
-              }
-
-              include /etc/nginx/mime.types;
-              default_type application/octet-stream;
-              sendfile on;
-              keepalive_timeout 65;
           }
-      notify: restart nginx
+      notify: Restart Nginx
 
   handlers:
-    - name: restart nginx
+    - name: Restart Nginx
       service:
         name: nginx
         state: restarted
 
-# ================================
-# APACHE WEB SERVER (node2.local)
-# ================================
-- name: Configure apache web server
+- name: Configure Apache Web Server
   hosts: node2.local
   become: yes
-
   tasks:
-    - name: Install latest apache2
+    - name: Install Apache2 Latest [web:8]
       apt:
         name: apache2
         state: latest
         update_cache: yes
 
-    - name: Ensure apache2 running
-      service:
-        name: apache2
-        state: started
-        enabled: yes
-
-    - name: Apache index page
+    - name: Set Apache Homepage
       copy:
+        content: 'jyidngaysqja'
         dest: /var/www/html/index.html
-        content: |
-          <html><body>jyidngaysqja</body></html>
-        owner: www-data
-        group: www-data
         mode: '0644'
 
-# ================================
-# TOMCAT SERVER (node3.local)
-# ================================
-- name: Configure tomcat web server
+- name: Configure Tomcat Web Server
   hosts: node3.local
   become: yes
-
   vars:
     tomcat_version: "9.0.35"
-    tomcat_base_dir: "/usr/local/apache-tomcat-{{ tomcat_version }}"
-
+    tomcat_url: "https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.35/bin/apache-tomcat-9.0.35.tar.gz"
+    tomcat_home: "/usr/local/tomcat"
   tasks:
-    - name: Install Java
+    - name: Install Java [web:19]
       apt:
         name: default-jdk
         state: present
         update_cache: yes
 
-    - name: Download Tomcat
-      get_url:
-        url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
-        dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
-        mode: '0644'
+    - name: Create Tomcat Group
+      group:
+        name: tomcat
+        state: present
 
-    - name: Extract Tomcat
+    - name: Create Tomcat User
+      user:
+        name: tomcat
+        group: tomcat
+        home: "{{ tomcat_home }}"
+        shell: /bin/false
+        create_home: no
+
+    - name: Download Tomcat [web:5]
+      get_url:
+        url: "{{ tomcat_url }}"
+        dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+
+    - name: Extract Tomcat to /usr/local
       unarchive:
         src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
         dest: /usr/local
         remote_src: yes
-        creates: "{{ tomcat_base_dir }}"
+        creates: "/usr/local/apache-tomcat-{{ tomcat_version }}"
 
-    - name: Ensure ROOT webapp directory
+    - name: Create Symlink for Tomcat
       file:
-        path: "{{ tomcat_base_dir }}/webapps/ROOT"
-        state: directory
-        mode: '0755'
+        src: "/usr/local/apache-tomcat-{{ tomcat_version }}"
+        dest: "{{ tomcat_home }}"
+        state: link
 
-    - name: Tomcat index page
+    - name: Set Ownership for Tomcat Directory
+      file:
+        path: "{{ tomcat_home }}"
+        owner: tomcat
+        group: tomcat
+        recurse: yes
+
+    - name: Set Tomcat Homepage
       copy:
-        dest: "{{ tomcat_base_dir }}/webapps/ROOT/index.html"
-        content: |
-          <html><body>nruznijciesi</body></html>
+        content: 'nruznijciesi'
+        dest: "{{ tomcat_home }}/webapps/ROOT/index.html"
+        owner: tomcat
+        group: tomcat
         mode: '0644'
 
-    - name: Start Tomcat
-      command: "{{ tomcat_base_dir }}/bin/startup.sh"
-      args:
-        chdir: "{{ tomcat_base_dir }}"
+    - name: Create Systemd Service for Tomcat
+      copy:
+        dest: /etc/systemd/system/tomcat.service
+        content: |
+          [Unit]
+          Description=Apache Tomcat Web Application Container
+          After=network.target
+
+          [Service]
+          Type=forking
+          User=tomcat
+          Group=tomcat
+          Environment="JAVA_HOME=/usr/lib/jvm/default-java"
+          Environment="CATALINA_PID={{ tomcat_home }}/temp/tomcat.pid"
+          Environment="CATALINA_HOME={{ tomcat_home }}"
+          Environment="CATALINA_BASE={{ tomcat_home }}"
+          ExecStart={{ tomcat_home }}/bin/startup.sh
+          ExecStop={{ tomcat_home }}/bin/shutdown.sh
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Reload Systemd
+        - Restart Tomcat
+
+  handlers:
+    - name: Reload Systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Restart Tomcat
+      service:
+        name: tomcat
+        state: restarted
+        enabled: yes
