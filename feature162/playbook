@@ -1,201 +1,125 @@
 ---
 - name: Setup load balancer and web servers
   hosts: all
+  gather_facts: yes
   become: yes
-  vars:
-    apache_homepage_content: "jyidngaysqja"
-    tomcat_homepage_content: "nruznijciesi"
-    tomcat_version: "9.0.35"
-    tomcat_install_dir: "/usr/local/tomcat-{{ tomcat_version }}"
-    nginx_upstream_conf: |
-      upstream backend {
-          server node2.local weight=3;
-          server node3.local:8080 weight=1;
-      }
-
-      server {
-          listen 80;
-
-          location / {
-              proxy_pass http://backend;
-              proxy_set_header Host $host;
-              proxy_set_header X-Real-IP $remote_addr;
-          }
-      }
 
   tasks:
+    - name: Debug start of playbook
+      debug:
+        msg: "Playbook started on {{ inventory_hostname }}"
 
-    # -------- Nginx on node1.local --------
-    - name: Install Nginx
+    - name: Ensure Nginx log directory exists (CI safe)
+      file:
+        path: /var/log/nginx
+        state: directory
+        owner: www-data
+        group: adm
+        mode: 0755
+      when: inventory_hostname == "node1.local"
+      register: nginx_log_dir
+    - name: Debug Nginx log directory
+      debug:
+        var: nginx_log_dir
+      when: inventory_hostname == "node1.local"
+
+    - name: Install Nginx on balancer node
       apt:
         name: nginx
         state: present
         update_cache: yes
       when: inventory_hostname == "node1.local"
-      notify: restart nginx
-
-    - name: Configure Nginx as load balancer
-      copy:
-        dest: /etc/nginx/sites-available/load_balancer
-        content: "{{ nginx_upstream_conf }}"
-        owner: root
-        group: root
-        mode: 0644
-      notify: restart nginx
+      notify:
+        - restart nginx
+      register: nginx_install
+    - name: Debug Nginx installation
+      debug:
+        var: nginx_install
       when: inventory_hostname == "node1.local"
 
-    - name: Enable load balancer site
-      file:
-        src: /etc/nginx/sites-available/load_balancer
-        dest: /etc/nginx/sites-enabled/load_balancer
-        state: link
-      notify: restart nginx
+    - name: Configure Nginx load balancer
+      template:
+        src: nginx_lb.conf.j2
+        dest: /etc/nginx/nginx.conf
+      when: inventory_hostname == "node1.local"
+      notify:
+        - restart nginx
+      register: nginx_config
+    - name: Debug Nginx config task
+      debug:
+        var: nginx_config
       when: inventory_hostname == "node1.local"
 
-    - name: Remove default Nginx site
-      file:
-        path: /etc/nginx/sites-enabled/default
-        state: absent
-      notify: restart nginx
-      when: inventory_hostname == "node1.local"
-
-    - name: Set Nginx worker processes to 1
-      lineinfile:
-        path: /etc/nginx/nginx.conf
-        regexp: '^worker_processes'
-        line: 'worker_processes 1;'
-      notify: restart nginx
-      when: inventory_hostname == "node1.local"
-
-    # -------- Apache2 on node2.local --------
-    - name: Install Apache2
+    - name: Install Apache2 on web node 1
       apt:
         name: apache2
         state: latest
         update_cache: yes
       when: inventory_hostname == "node2.local"
-      notify: restart apache
+      notify:
+        - restart apache2
+      register: apache_install
+    - name: Debug Apache installation
+      debug:
+        var: apache_install
+      when: inventory_hostname == "node2.local"
 
-    - name: Set Apache2 homepage
+    - name: Create Apache homepage
       copy:
         dest: /var/www/html/index.html
-        content: "{{ apache_homepage_content }}"
-        owner: www-data
-        group: www-data
-        mode: 0644
-      notify: restart apache
+        content: "jyidngaysqja"
+      when: inventory_hostname == "node2.local"
+      register: apache_homepage
+    - name: Debug Apache homepage creation
+      debug:
+        var: apache_homepage
       when: inventory_hostname == "node2.local"
 
-    - name: Ensure Apache2 is running
-      service:
-        name: apache2
-        state: started
-        enabled: yes
-      when: inventory_hostname == "node2.local"
-
-    # -------- Tomcat on node3.local --------
-    - name: Install required packages for Tomcat
-      apt:
-        name: "{{ item }}"
-        state: present
-        update_cache: yes
-      loop:
-        - openjdk-11-jdk
-        - wget
-        - tar
-      when: inventory_hostname == "node3.local"
-
-    - name: Download Tomcat
+    - name: Install Tomcat 9.0.35 on web node 2
       get_url:
-        url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
-        dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
-        mode: '0644'
+        url: https://downloads.apache.org/tomcat/tomcat-9/v9.0.35/bin/apache-tomcat-9.0.35.tar.gz
+        dest: /tmp/apache-tomcat-9.0.35.tar.gz
+      when: inventory_hostname == "node3.local"
+      register: tomcat_download
+    - name: Debug Tomcat download
+      debug:
+        var: tomcat_download
       when: inventory_hostname == "node3.local"
 
     - name: Extract Tomcat
       unarchive:
-        src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
-        dest: /usr/local
+        src: /tmp/apache-tomcat-9.0.35.tar.gz
+        dest: /usr/local/
         remote_src: yes
       when: inventory_hostname == "node3.local"
-
-    - name: Ensure tomcat user exists
-      user:
-        name: tomcat
-        shell: /bin/false
-        createhome: no
+      register: tomcat_extract
+    - name: Debug Tomcat extraction
+      debug:
+        var: tomcat_extract
       when: inventory_hostname == "node3.local"
 
-    - name: Set Tomcat permissions
-      file:
-        path: "{{ tomcat_install_dir }}"
-        state: directory
-        owner: tomcat
-        group: tomcat
-        recurse: yes
-      when: inventory_hostname == "node3.local"
-
-    - name: Set Tomcat homepage
+    - name: Create Tomcat homepage
       copy:
-        dest: "{{ tomcat_install_dir }}/webapps/ROOT/index.html"
-        content: "{{ tomcat_homepage_content }}"
-        owner: tomcat
-        group: tomcat
-        mode: 0644
-      notify: restart tomcat
+        dest: /usr/local/apache-tomcat-9.0.35/webapps/ROOT/index.html
+        content: "nruznijciesi"
+      when: inventory_hostname == "node3.local"
+      register: tomcat_homepage
+    - name: Debug Tomcat homepage creation
+      debug:
+        var: tomcat_homepage
       when: inventory_hostname == "node3.local"
 
-    - name: Create systemd service for Tomcat
-      copy:
-        dest: /etc/systemd/system/tomcat.service
-        content: |
-          [Unit]
-          Description=Apache Tomcat Web Application Container
-          After=network.target
-
-          [Service]
-          Type=forking
-          User=tomcat
-          Group=tomcat
-          Environment="JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64"
-          Environment="CATALINA_PID={{ tomcat_install_dir }}/temp/tomcat.pid"
-          Environment="CATALINA_HOME={{ tomcat_install_dir }}"
-          Environment="CATALINA_BASE={{ tomcat_install_dir }}"
-          ExecStart={{ tomcat_install_dir }}/bin/startup.sh
-          ExecStop={{ tomcat_install_dir }}/bin/shutdown.sh
-          Restart=on-failure
-
-          [Install]
-          WantedBy=multi-user.target
-      notify: restart tomcat
-      when: inventory_hostname == "node3.local"
-
-    - name: Reload systemd daemon
-      command: systemctl daemon-reload
-      when: inventory_hostname == "node3.local"
-
-    - name: Enable and start Tomcat
-      service:
-        name: tomcat
-        state: started
-        enabled: yes
-      when: inventory_hostname == "node3.local"
+    - name: Debug end of playbook
+      debug:
+        msg: "Playbook finished tasks on {{ inventory_hostname }}"
 
   handlers:
     - name: restart nginx
       service:
         name: nginx
         state: restarted
-      when: inventory_hostname == "node1.local"
 
-    - name: restart apache
+    - name: restart apache2
       service:
         name: apache2
         state: restarted
-      when: inventory_hostname == "node2.local"
-
-    - name: restart tomcat
-      service:
-        name: tomcat
-        state: restarted
-      when: inventory_hostname == "node3.local"
