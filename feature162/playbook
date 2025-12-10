@@ -1,125 +1,137 @@
 ---
 - name: Setup load balancer and web servers
   hosts: all
-  gather_facts: yes
   become: yes
 
+  vars:
+    max_retries: 10
+    retry_delay: 5
+    nginx_log_path: /var/log/nginx/access.log
+    tomcat_log_path: /var/log/tomcat9/catalina.out
+    apache_log_path: /var/log/apache2/access.log
+
   tasks:
-    - name: Debug start of playbook
-      debug:
-        msg: "Playbook started on {{ inventory_hostname }}"
 
-    - name: Ensure Nginx log directory exists (CI safe)
-      file:
-        path: /var/log/nginx
-        state: directory
-        owner: www-data
-        group: adm
-        mode: 0755
-      when: inventory_hostname == "node1.local"
-      register: nginx_log_dir
-    - name: Debug Nginx log directory
-      debug:
-        var: nginx_log_dir
-      when: inventory_hostname == "node1.local"
-
-    - name: Install Nginx on balancer node
+    - name: Update apt cache
       apt:
-        name: nginx
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install required packages
+      apt:
+        name:
+          - nginx
+          - tomcat9
+          - apache2
         state: present
-        update_cache: yes
-      when: inventory_hostname == "node1.local"
-      notify:
-        - restart nginx
-      register: nginx_install
-    - name: Debug Nginx installation
-      debug:
-        var: nginx_install
-      when: inventory_hostname == "node1.local"
+      when: ansible_os_family == "Debian"
 
-    - name: Configure Nginx load balancer
-      template:
-        src: nginx_lb.conf.j2
-        dest: /etc/nginx/nginx.conf
-      when: inventory_hostname == "node1.local"
-      notify:
-        - restart nginx
-      register: nginx_config
-    - name: Debug Nginx config task
-      debug:
-        var: nginx_config
-      when: inventory_hostname == "node1.local"
+    - name: Ensure SSH is running
+      service:
+        name: ssh
+        state: started
+        enabled: yes
+      register: ssh_service
+      retries: "{{ max_retries }}"
+      delay: "{{ retry_delay }}"
+      until: ssh_service.state == "started"
 
-    - name: Install Apache2 on web node 1
-      apt:
-        name: apache2
-        state: latest
-        update_cache: yes
-      when: inventory_hostname == "node2.local"
-      notify:
-        - restart apache2
-      register: apache_install
-    - name: Debug Apache installation
-      debug:
-        var: apache_install
-      when: inventory_hostname == "node2.local"
-
-    - name: Create Apache homepage
-      copy:
-        dest: /var/www/html/index.html
-        content: "jyidngaysqja"
-      when: inventory_hostname == "node2.local"
-      register: apache_homepage
-    - name: Debug Apache homepage creation
-      debug:
-        var: apache_homepage
-      when: inventory_hostname == "node2.local"
-
-    - name: Install Tomcat 9.0.35 on web node 2
-      get_url:
-        url: https://downloads.apache.org/tomcat/tomcat-9/v9.0.35/bin/apache-tomcat-9.0.35.tar.gz
-        dest: /tmp/apache-tomcat-9.0.35.tar.gz
-      when: inventory_hostname == "node3.local"
-      register: tomcat_download
-    - name: Debug Tomcat download
-      debug:
-        var: tomcat_download
-      when: inventory_hostname == "node3.local"
-
-    - name: Extract Tomcat
-      unarchive:
-        src: /tmp/apache-tomcat-9.0.35.tar.gz
-        dest: /usr/local/
-        remote_src: yes
-      when: inventory_hostname == "node3.local"
-      register: tomcat_extract
-    - name: Debug Tomcat extraction
-      debug:
-        var: tomcat_extract
-      when: inventory_hostname == "node3.local"
-
-    - name: Create Tomcat homepage
-      copy:
-        dest: /usr/local/apache-tomcat-9.0.35/webapps/ROOT/index.html
-        content: "nruznijciesi"
-      when: inventory_hostname == "node3.local"
-      register: tomcat_homepage
-    - name: Debug Tomcat homepage creation
-      debug:
-        var: tomcat_homepage
-      when: inventory_hostname == "node3.local"
-
-    - name: Debug end of playbook
-      debug:
-        msg: "Playbook finished tasks on {{ inventory_hostname }}"
-
-  handlers:
-    - name: restart nginx
+    - name: Ensure Nginx is running
       service:
         name: nginx
+        state: started
+        enabled: yes
+      register: nginx_service
+      retries: "{{ max_retries }}"
+      delay: "{{ retry_delay }}"
+      until: nginx_service.state == "started"
+
+    - name: Ensure Tomcat is running
+      service:
+        name: tomcat9
+        state: started
+        enabled: yes
+      register: tomcat_service
+      retries: "{{ max_retries }}"
+      delay: "{{ retry_delay }}"
+      until: tomcat_service.state == "started"
+
+    - name: Ensure Apache is running
+      service:
+        name: apache2
+        state: started
+        enabled: yes
+      register: apache_service
+      retries: "{{ max_retries }}"
+      delay: "{{ retry_delay }}"
+      until: apache_service.state == "started"
+
+    - name: Wait for Nginx log to appear
+      stat:
+        path: "{{ nginx_log_path }}"
+      register: nginx_log
+      retries: "{{ max_retries }}"
+      delay: "{{ retry_delay }}"
+      until: nginx_log.stat.exists
+
+    - name: Wait for Tomcat log to appear
+      stat:
+        path: "{{ tomcat_log_path }}"
+      register: tomcat_log
+      retries: "{{ max_retries }}"
+      delay: "{{ retry_delay }}"
+      until: tomcat_log.stat.exists
+
+    - name: Wait for Apache log to appear
+      stat:
+        path: "{{ apache_log_path }}"
+      register: apache_log
+      retries: "{{ max_retries }}"
+      delay: "{{ retry_delay }}"
+      until: apache_log.stat.exists
+
+    - name: Debug - confirm all services started
+      debug:
+        msg: |
+          SSH: {{ ssh_service.state }}
+          Nginx: {{ nginx_service.state }}
+          Tomcat: {{ tomcat_service.state }}
+          Apache: {{ apache_service.state }}
+          Nginx log exists: {{ nginx_log.stat.exists }}
+          Tomcat log exists: {{ tomcat_log.stat.exists }}
+          Apache log exists: {{ apache_log.stat.exists }}
+
+    # Additional configuration tasks
+    - name: Deploy Nginx configuration
+      copy:
+        src: files/nginx.conf
+        dest: /etc/nginx/nginx.conf
+      notify: Reload Nginx
+
+    - name: Deploy Tomcat configuration
+      copy:
+        src: files/server.xml
+        dest: /etc/tomcat9/server.xml
+      notify: Restart Tomcat
+
+    - name: Deploy Apache configuration
+      copy:
+        src: files/apache2.conf
+        dest: /etc/apache2/apache2.conf
+      notify: Restart Apache
+
+  handlers:
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded
+
+    - name: Restart Tomcat
+      service:
+        name: tomcat9
         state: restarted
 
-    - name: restart apache2
+    - name: Restart Apache
       service:
         name: apache2
         state: restarted
