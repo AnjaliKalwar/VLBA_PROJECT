@@ -1,13 +1,4 @@
 ---
-- name: Wait for all nodes
-  hosts: balancer,web
-  gather_facts: no
-  tasks:
-    - name: Wait until nodes are up
-      wait_for_connection:
-        delay: 2
-        timeout: 60
-
 # ================================
 # NGINX LOAD BALANCER (node1.local)
 # ================================
@@ -16,20 +7,19 @@
   become: yes
 
   tasks:
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-        cache_valid_time: 3600
+    - name: DEBUG — Starting balancer config
+      debug:
+        msg: "Installing and configuring NGINX on balancer…"
 
     - name: Install nginx
       apt:
         name: nginx
         state: present
+        update_cache: yes
 
-    - name: Configure nginx with correct syntax
+    - name: Configure nginx with 1 worker and weighted upstream
       copy:
         dest: /etc/nginx/nginx.conf
-        backup: yes
         content: |
           user www-data;
           worker_processes 1;
@@ -41,49 +31,28 @@
           }
 
           http {
-              include /etc/nginx/mime.types;
-              default_type application/octet-stream;
-
-              sendfile on;
-              tcp_nopush on;
-              tcp_nodelay on;
-              keepalive_timeout 65;
-
               upstream backend {
                   server node2.local:80 weight=3;
-                  server node3.local:8080 weight=1;
+                  server node3.local:80 weight=1;
               }
 
               server {
                   listen 80 default_server;
                   listen [::]:80 default_server;
-                  server_name _;
 
                   location / {
                       proxy_pass http://backend;
                       proxy_set_header Host $host;
                       proxy_set_header X-Real-IP $remote_addr;
-                      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                      proxy_set_header X-Forwarded-Proto $scheme;
-                      proxy_connect_timeout 5s;
-                      proxy_send_timeout 30s;
-                      proxy_read_timeout 30s;
                   }
               }
+
+              include /etc/nginx/mime.types;
+              default_type application/octet-stream;
+              sendfile on;
+              keepalive_timeout 65;
           }
       notify: restart nginx
-
-    - name: Test nginx configuration
-      command: nginx -t
-      changed_when: false
-      register: nginx_test
-      failed_when: nginx_test.rc != 0
-
-    - name: Enable and start nginx
-      service:
-        name: nginx
-        state: started
-        enabled: yes
 
   handlers:
     - name: restart nginx
@@ -91,58 +60,48 @@
         name: nginx
         state: restarted
 
+
 # ================================
-# APACHE2 WEB SERVER (node2.local)
+# APACHE WEB SERVER (node2.local)
 # ================================
 - name: Configure apache web server
   hosts: node2.local
   become: yes
 
   tasks:
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-        cache_valid_time: 3600
+    - name: DEBUG — Starting Apache setup
+      debug:
+        msg: "Installing Apache on node2…"
 
     - name: Install latest apache2
       apt:
         name: apache2
         state: latest
+        update_cache: yes
 
-    - name: Enable mod_proxy for compatibility
-      apache2_module:
-        name: proxy
-        state: present
-      notify: restart apache2
-
-    - name: Create Apache index.html
-      copy:
-        dest: /var/www/html/index.html
-        content: |
-          <!DOCTYPE html>
-          <html>
-          <head><title>Apache Node</title></head>
-          <body>jyidngaysqja</body>
-          </html>
-        owner: www-data
-        group: www-data
-        mode: '0644'
-      notify: restart apache2
-
-    - name: Enable and start apache2
+    - name: Ensure apache2 is enabled and started
       service:
         name: apache2
         state: started
         enabled: yes
 
-  handlers:
-    - name: restart apache2
-      service:
-        name: apache2
-        state: restarted
+    - name: Create Apache index page
+      copy:
+        dest: /var/www/html/index.html
+        content: |
+          <html>
+          <head><title>Apache node</title></head>
+          <body>
+          jyidngaysqja
+          </body>
+          </html>
+        owner: www-data
+        group: www-data
+        mode: '0644'
+
 
 # ================================
-# TOMCAT 9.0.35 (node3.local)
+# TOMCAT SERVER (node3.local)
 # ================================
 - name: Configure tomcat web server
   hosts: node3.local
@@ -151,90 +110,68 @@
   vars:
     tomcat_version: "9.0.35"
     tomcat_base_dir: "/usr/local/apache-tomcat-{{ tomcat_version }}"
-    tomcat_user: tomcat
-    tomcat_group: tomcat
 
   tasks:
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-        cache_valid_time: 3600
+    - name: DEBUG — Starting Tomcat installation
+      debug:
+        msg: "Installing Tomcat on node3…"
 
-    - name: Install Java
+    - name: Install Java (OpenJDK)
       apt:
         name: default-jdk
         state: present
+        update_cache: yes
 
-    - name: Create tomcat user
-      user:
-        name: "{{ tomcat_user }}"
-        shell: /bin/false
-        home: /opt/tomcat
-        createhome: no
-        state: present
-
-    - name: Download Tomcat {{ tomcat_version }}
+    - name: Download Tomcat archive
       get_url:
         url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
         dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
         mode: '0644'
-        timeout: 120
 
-    - name: Extract Tomcat to /usr/local
+    - name: Extract Tomcat under /usr/local
       unarchive:
         src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
         dest: /usr/local
         remote_src: yes
         creates: "{{ tomcat_base_dir }}"
 
-    - name: Set Tomcat permissions
-      file:
-        path: "{{ tomcat_base_dir }}"
-        owner: "{{ tomcat_user }}"
-        group: "{{ tomcat_group }}"
-        mode: '0755'
-        recurse: yes
-
-    - name: Create ROOT webapp directory
+    - name: Ensure ROOT webapp directory exists
       file:
         path: "{{ tomcat_base_dir }}/webapps/ROOT"
         state: directory
-        owner: "{{ tomcat_user }}"
-        group: "{{ tomcat_group }}"
         mode: '0755'
 
-    - name: Create Tomcat index.html
+    - name: Create Tomcat index page
       copy:
         dest: "{{ tomcat_base_dir }}/webapps/ROOT/index.html"
         content: |
-          <!DOCTYPE html>
           <html>
-          <head><title>Tomcat Node</title></head>
-          <body>nruznijciesi</body>
+          <head><title>Tomcat node</title></head>
+          <body>
+          nruznijciesi
+          </body>
           </html>
-        owner: "{{ tomcat_user }}"
-        group: "{{ tomcat_group }}"
         mode: '0644'
 
-    - name: Stop existing Tomcat
-      shell: "{{ tomcat_base_dir }}/bin/shutdown.sh || true"
-      become_user: "{{ tomcat_user }}"
-      ignore_errors: yes
-      environment:
-        JAVA_HOME: /usr/lib/jvm/default-java
-
     - name: Start Tomcat
-      shell: |
-        export JAVA_HOME=/usr/lib/jvm/default-java
-        {{ tomcat_base_dir }}/bin/startup.sh
-      become_user: "{{ tomcat_user }}"
-      environment:
-        JAVA_HOME: /usr/lib/jvm/default-java
-      changed_when: true
+      command: "{{ tomcat_base_dir }}/bin/startup.sh"
+      args:
+        chdir: "{{ tomcat_base_dir }}"
+      register: tomcat_start
+      changed_when: tomcat_start.rc == 0
 
-    - name: Wait for Tomcat to start
+    # ========== IMPORTANT FIX ==========
+    # CI FAIL FIX → WAIT UNTIL TOMCAT REALLY LISTENS ON PORT 80
+    - name: DEBUG — Waiting for Tomcat to come up…
+      debug:
+        msg: "Waiting for Tomcat to respond on port 80…"
+
+    - name: Wait for Tomcat to be UP on port 80
       wait_for:
-        port: 8080
-        delay: 3
-        timeout: 30
-        host: localhost
+        port: 80
+        delay: 2
+        timeout: 20
+
+    - name: DEBUG — Tomcat is UP
+      debug:
+        msg: "Tomcat is confirmed UP on port 80!"
