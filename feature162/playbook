@@ -1,5 +1,7 @@
 ---
-# Nginx load balancer on node1.local (group: balancer)
+# ================================
+# NGINX LOAD BALANCER (node1.local)
+# ================================
 - name: Configure nginx load balancer
   hosts: balancer
   become: yes
@@ -11,7 +13,7 @@
         state: present
         update_cache: yes
 
-    - name: Configure nginx with 1 worker and weighted upstream
+    - name: Configure nginx - FIXED PORTS
       copy:
         dest: /etc/nginx/nginx.conf
         content: |
@@ -26,8 +28,8 @@
 
           http {
               upstream backend {
-                  server node2.local:80 weight=3;
-                  server node3.local:80 weight=1;
+                  server node2.local:80 weight=3;     # Apache
+                  server node3.local:8080 weight=1;   # Tomcat ✓
               }
 
               server {
@@ -43,8 +45,6 @@
 
               include /etc/nginx/mime.types;
               default_type application/octet-stream;
-              sendfile on;
-              keepalive_timeout 65;
           }
       notify: restart nginx
 
@@ -54,11 +54,12 @@
         name: nginx
         state: restarted
 
-# Apache web server on node2.local
+# ================================
+# APACHE (node2.local) - SAME
+# ================================
 - name: Configure apache web server
   hosts: node2.local
   become: yes
-
   tasks:
     - name: Install latest apache2
       apt:
@@ -66,76 +67,67 @@
         state: latest
         update_cache: yes
 
-    - name: Ensure apache2 is enabled and started
+    - name: Ensure apache2 running
       service:
         name: apache2
         state: started
         enabled: yes
 
-    - name: Create Apache index page with required content
+    - name: Apache index.html
       copy:
         dest: /var/www/html/index.html
         content: |
-          <html>
-          <head><title>Apache node</title></head>
-          <body>
-          jyidngaysqja
-          </body>
-          </html>
-        owner: www-data
-        group: www-data
-        mode: '0644'
+          <html><body>jyidngaysqja</body></html>
 
-# Tomcat 9.0.35 on node3.local
+# ================================
+# TOMCAT (node3.local) - FIXED
+# ================================
 - name: Configure tomcat web server
   hosts: node3.local
   become: yes
-
   vars:
     tomcat_version: "9.0.35"
     tomcat_base_dir: "/usr/local/apache-tomcat-{{ tomcat_version }}"
 
   tasks:
-    - name: Install Java (OpenJDK)
+    - name: Install Java
       apt:
         name: default-jdk
         state: present
         update_cache: yes
 
-    - name: Download Tomcat {{ tomcat_version }} archive
+    - name: Download Tomcat
       get_url:
         url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
         dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
-        mode: '0644'
 
-    - name: Extract Tomcat under /usr/local
+    - name: Extract Tomcat
       unarchive:
         src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
         dest: /usr/local
         remote_src: yes
         creates: "{{ tomcat_base_dir }}"
 
-    - name: Ensure ROOT webapp directory exists
+    - name: ROOT webapp dir
       file:
         path: "{{ tomcat_base_dir }}/webapps/ROOT"
         state: directory
         mode: '0755'
 
-    - name: Create Tomcat index page with required content
+    - name: Tomcat index.html
       copy:
         dest: "{{ tomcat_base_dir }}/webapps/ROOT/index.html"
         content: |
-          <html>
-          <head><title>Tomcat node</title></head>
-          <body>
-          nruznijciesi
-          </body>
-          </html>
-        mode: '0644'
+          <html><body>nruznijciesi</body></html>
 
     - name: Start Tomcat
       command: "{{ tomcat_base_dir }}/bin/startup.sh"
       args:
         chdir: "{{ tomcat_base_dir }}"
-      register: tomcat_start
-      changed_when: tomcat_start.rc == 0
+
+    - name: Wait for Tomcat 8080 ✓
+      wait_for:
+        port: 8080      # ✅ CORRECT PORT
+        delay: 5
+        timeout: 30
+        host: 0.0.0.0   # ✅ localhost on node3
