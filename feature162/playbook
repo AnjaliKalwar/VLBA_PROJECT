@@ -1,147 +1,198 @@
----
-# ================================
-# NGINX LOAD BALANCER (node1.local)
-# ================================
-- name: Configure nginx load balancer
+- name: Configure Nginx load balancer on node1
   hosts: balancer
-  become: yes
-
+  become: true
+  vars:
+    apache_host: node2.local
+    tomcat_host: node3.local
   tasks:
-    - name: Install nginx
-      apt:
+    - name: Install Nginx
+      ansible.builtin.apt:
         name: nginx
         state: present
         update_cache: yes
 
-    - name: Configure nginx - USE HOSTNAMES + IP FALLBACK
-      copy:
-        dest: /etc/nginx/nginx.conf
-        content: |
-          user www-data;
+    - name: Configure Nginx main settings (worker_processes 1)
+      ansible.builtin.blockinfile:
+        path: /etc/nginx/nginx.conf
+        insertafter: "^user .*;"
+        block: |
           worker_processes 1;
-          pid /run/nginx.pid;
-          include /etc/nginx/modules-enabled/*.conf;
+      notify: Restart nginx
 
-          events {
-              worker_connections 768;
+    - name: Configure Nginx HTTP load balancer
+      ansible.builtin.copy:
+        dest: /etc/nginx/conf.d/load_balancer.conf
+        mode: '0644'
+        content: |
+          upstream backend {
+              server {{ apache_host }}:80 weight=3;
+              server {{ tomcat_host }}:8080 weight=1;
           }
 
-          http {
-              upstream backend {
-                  server node2.local:80 weight=3;
-                  server node3.local:8080 weight=1;
+          server {
+              listen 80 default_server;
+              listen [::]:80 default_server;
+
+              location / {
+                  proxy_pass http://backend;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
               }
-
-              server {
-                  listen 80 default_server;
-                  listen [::]:80 default_server;
-
-                  location / {
-                      proxy_pass http://backend;
-                      proxy_set_header Host $host;
-                      proxy_set_header X-Real-IP $remote_addr;
-                      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                      proxy_connect_timeout 5s;
-                      proxy_send_timeout 30s;
-                      proxy_read_timeout 30s;
-                  }
-              }
-
-              include /etc/nginx/mime.types;
-              default_type application/octet-stream;
-              sendfile on;
-              keepalive_timeout 65;
           }
-      notify: restart nginx
+      notify: Restart nginx
+
+    - name: Ensure Nginx is enabled and running
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: yes
 
   handlers:
-    - name: restart nginx
-      service:
+    - name: Restart nginx
+      ansible.builtin.service:
         name: nginx
         state: restarted
 
-# ================================
-# APACHE WEB SERVER (node2.local)
-# ================================
-- name: Configure apache web server
+- name: Configure Apache web server on node2
   hosts: node2.local
-  become: yes
-
+  become: true
   tasks:
-    - name: Install latest apache2
-      apt:
+    - name: Install latest Apache2
+      ansible.builtin.apt:
         name: apache2
         state: latest
         update_cache: yes
 
-    - name: Ensure apache2 running
-      service:
+    - name: Ensure Apache2 is enabled and running
+      ansible.builtin.service:
         name: apache2
         state: started
         enabled: yes
 
-    - name: Apache index page with required string
-      copy:
+    - name: Deploy Apache homepage with required string
+      ansible.builtin.copy:
         dest: /var/www/html/index.html
-        content: |
-          <html>
-          <body>jyidngaysqja</body>
-          </html>
-        owner: www-data
-        group: www-data
         mode: '0644'
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Apache node</title>
+          </head>
+          <body>
+              <h1>Apache 2 node</h1>
+              <p>jyidngaysqja</p>
+          </body>
+          </html>
 
-# ================================
-# TOMCAT 9.0.35 (node3.local)
-# ================================
-- name: Configure tomcat web server
+- name: Configure Tomcat 9.0.35 on node3
   hosts: node3.local
-  become: yes
-
+  become: true
   vars:
     tomcat_version: "9.0.35"
-    tomcat_base_dir: "/usr/local/apache-tomcat-{{ tomcat_version }}"
-
+    tomcat_base_dir: "/usr/local"
+    tomcat_install_dir: "/usr/local/apache-tomcat-9.0.35"
+    tomcat_download_url: "https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.35/bin/apache-tomcat-9.0.35.tar.gz"
   tasks:
-    - name: Install Java
-      apt:
-        name: default-jdk
+    - name: Ensure required packages are present
+      ansible.builtin.apt:
+        name:
+          - default-jdk
+          - curl
         state: present
         update_cache: yes
 
-    - name: Download Tomcat {{ tomcat_version }}
-      get_url:
-        url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
-        dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
-        mode: '0644'
+    - name: Create Tomcat group
+      ansible.builtin.group:
+        name: tomcat
+        state: present
 
-    - name: Extract Tomcat to /usr/local
-      unarchive:
-        src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
-        dest: /usr/local
-        remote_src: yes
-        creates: "{{ tomcat_base_dir }}"
+    - name: Create Tomcat user
+      ansible.builtin.user:
+        name: tomcat
+        group: tomcat
+        home: "{{ tomcat_install_dir }}"
+        shell: /bin/false
+        state: present
 
-    - name: Create ROOT webapp directory
-      file:
-        path: "{{ tomcat_base_dir }}/webapps/ROOT"
+    - name: Create Tomcat base directory
+      ansible.builtin.file:
+        path: "{{ tomcat_base_dir }}"
         state: directory
         mode: '0755'
 
-    - name: Tomcat index page with required string
-      copy:
-        dest: "{{ tomcat_base_dir }}/webapps/ROOT/index.html"
-        content: |
-          <html>
-          <body>nruznijciesi</body>
-          </html>
+    - name: Download Tomcat archive
+      ansible.builtin.get_url:
+        url: "{{ tomcat_download_url }}"
+        dest: /tmp/apache-tomcat-{{ tomcat_version }}.tar.gz
         mode: '0644'
 
-    - name: Stop existing Tomcat instance
-      shell: "{{ tomcat_base_dir }}/bin/shutdown.sh || true"
-      ignore_errors: yes
+    - name: Extract Tomcat
+      ansible.builtin.unarchive:
+        src: /tmp/apache-tomcat-{{ tomcat_version }}.tar.gz
+        dest: "{{ tomcat_base_dir }}"
+        remote_src: yes
+        creates: "{{ tomcat_install_dir }}"
 
-    - name: Start Tomcat
-      command: "{{ tomcat_base_dir }}/bin/startup.sh"
-      args:
-        chdir: "{{ tomcat_base_dir }}"
+    - name: Set ownership on Tomcat directory
+      ansible.builtin.file:
+        path: "{{ tomcat_install_dir }}"
+        state: directory
+        recurse: yes
+        owner: tomcat
+        group: tomcat
+
+    - name: Create Tomcat systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tomcat.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Apache Tomcat 9.0.35
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=tomcat
+          Group=tomcat
+          Environment=JAVA_HOME=/usr/lib/jvm/default-java
+          Environment=CATALINA_HOME={{ tomcat_install_dir }}
+          Environment=CATALINA_BASE={{ tomcat_install_dir }}
+          ExecStart={{ tomcat_install_dir }}/bin/catalina.sh run
+          ExecStop={{ tomcat_install_dir }}/bin/catalina.sh stop
+          Restart=on-failure
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Reload systemd
+
+    - name: Deploy Tomcat ROOT homepage with required string
+      ansible.builtin.copy:
+        dest: "{{ tomcat_install_dir }}/webapps/ROOT/index.html"
+        owner: tomcat
+        group: tomcat
+        mode: '0644'
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Tomcat node</title>
+          </head>
+          <body>
+              <h1>Tomcat node</h1>
+              <p>nruznijciesi</p>
+          </body>
+          </html>
+
+    - name: Ensure Tomcat service is enabled and running
+      ansible.builtin.systemd:
+        name: tomcat
+        daemon_reload: yes
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: yes
