@@ -11,7 +11,7 @@
         state: present
         update_cache: yes
 
-    - name: Configure nginx worker processes to 1 and upstream
+    - name: Configure nginx with 1 worker and weighted upstream
       copy:
         dest: /etc/nginx/nginx.conf
         content: |
@@ -26,8 +26,8 @@
 
           http {
               upstream backend {
-                  server node2.local weight=3;
-                  server node3.local weight=1;
+                  server node2.local:80 weight=3;
+                  server node3.local:80 weight=1;
               }
 
               server {
@@ -36,6 +36,8 @@
 
                   location / {
                       proxy_pass http://backend;
+                      proxy_set_header Host $host;
+                      proxy_set_header X-Real-IP $remote_addr;
                   }
               }
 
@@ -91,8 +93,7 @@
 
   vars:
     tomcat_version: "9.0.35"
-    tomcat_install_dir: "/usr/local"
-    tomcat_base_dir: "/usr/local/apache-tomcat-9.0.35"
+    tomcat_base_dir: "/usr/local/apache-tomcat-{{ tomcat_version }}"
 
   tasks:
     - name: Install Java (OpenJDK)
@@ -101,7 +102,7 @@
         state: present
         update_cache: yes
 
-    - name: Download Tomcat archive
+    - name: Download Tomcat {{ tomcat_version }} archive
       get_url:
         url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
         dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
@@ -110,11 +111,17 @@
     - name: Extract Tomcat under /usr/local
       unarchive:
         src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
-        dest: "{{ tomcat_install_dir }}"
+        dest: /usr/local
         remote_src: yes
         creates: "{{ tomcat_base_dir }}"
 
-    - name: Create simple ROOT index page with required content
+    - name: Ensure ROOT webapp directory exists
+      file:
+        path: "{{ tomcat_base_dir }}/webapps/ROOT"
+        state: directory
+        mode: '0755'
+
+    - name: Create Tomcat index page with required content
       copy:
         dest: "{{ tomcat_base_dir }}/webapps/ROOT/index.html"
         content: |
@@ -124,13 +131,11 @@
           nruznijciesi
           </body>
           </html>
-        owner: root
-        group: root
         mode: '0644'
 
-    - name: Start Tomcat in background via startup script
+    - name: Start Tomcat
       command: "{{ tomcat_base_dir }}/bin/startup.sh"
       args:
         chdir: "{{ tomcat_base_dir }}"
       register: tomcat_start
-      changed_when: "'Tomcat started' in tomcat_start.stdout or tomcat_start.rc == 0"
+      changed_when: tomcat_start.rc == 0
