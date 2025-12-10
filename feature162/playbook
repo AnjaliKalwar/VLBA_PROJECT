@@ -1,198 +1,247 @@
-- name: Configure Nginx load balancer on node1
-  hosts: balancer
-  become: true
-  vars:
-    apache_host: node2.local
-    tomcat_host: node3.local
+---
+- name: Wait for all nodes to be reachable
+  hosts: all
+  gather_facts: no
   tasks:
-    - name: Install Nginx
-      ansible.builtin.apt:
+    - name: Wait until nodes are up
+      wait_for_connection:
+        delay: 2
+        timeout: 60
+
+# ================================
+# NGINX LOAD BALANCER (node1.local)
+# ================================
+- name: Configure nginx load balancer
+  hosts: balancer
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install nginx
+      apt:
         name: nginx
         state: present
-        update_cache: yes
 
-    - name: Configure Nginx main settings (worker_processes 1)
-      ansible.builtin.blockinfile:
-        path: /etc/nginx/nginx.conf
-        insertafter: "^user .*;"
-        block: |
-          worker_processes 1;
-      notify: Restart nginx
-
-    - name: Configure Nginx HTTP load balancer
-      ansible.builtin.copy:
-        dest: /etc/nginx/conf.d/load_balancer.conf
-        mode: '0644'
+    - name: Create nginx configuration with correct syntax
+      copy:
+        dest: /etc/nginx/nginx.conf
+        backup: yes
         content: |
-          upstream backend {
-              server {{ apache_host }}:80 weight=3;
-              server {{ tomcat_host }}:8080 weight=1;
+          user www-data;
+          worker_processes 1;
+          pid /run/nginx.pid;
+          include /etc/nginx/modules-enabled/*.conf;
+
+          events {
+              worker_connections 768;
           }
 
-          server {
-              listen 80 default_server;
-              listen [::]:80 default_server;
+          http {
+              include /etc/nginx/mime.types;
+              default_type application/octet-stream;
 
-              location / {
-                  proxy_pass http://backend;
-                  proxy_set_header Host $host;
-                  proxy_set_header X-Real-IP $remote_addr;
-                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              sendfile on;
+              tcp_nopush on;
+              tcp_nodelay on;
+              keepalive_timeout 65;
+
+              upstream backend_servers {
+                  server node2.local:80 weight=3;
+                  server node3.local:8080 weight=1;
+              }
+
+              server {
+                  listen 80 default_server;
+                  listen [::]:80 default_server;
+                  server_name _;
+
+                  location / {
+                      proxy_pass http://backend_servers;
+                      proxy_set_header Host $host;
+                      proxy_set_header X-Real-IP $remote_addr;
+                      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                      proxy_set_header X-Forwarded-Proto $scheme;
+                  }
               }
           }
-      notify: Restart nginx
 
-    - name: Ensure Nginx is enabled and running
-      ansible.builtin.service:
+    - name: Test nginx configuration
+      command: nginx -t
+      changed_when: false
+      register: nginx_test
+      failed_when: nginx_test.rc != 0
+
+    - name: Enable and start nginx
+      systemd:
         name: nginx
         state: started
         enabled: yes
+        daemon_reload: yes
 
-  handlers:
-    - name: Restart nginx
-      ansible.builtin.service:
-        name: nginx
-        state: restarted
-
-- name: Configure Apache web server on node2
+# ================================
+# APACHE2 WEB SERVER (node2.local)
+# ================================
+- name: Configure apache2 web server
   hosts: node2.local
-  become: true
+  become: yes
+  gather_facts: yes
+
   tasks:
-    - name: Install latest Apache2
-      ansible.builtin.apt:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install latest apache2
+      apt:
         name: apache2
         state: latest
-        update_cache: yes
 
-    - name: Ensure Apache2 is enabled and running
-      ansible.builtin.service:
-        name: apache2
-        state: started
-        enabled: yes
+    - name: Enable mod_proxy for load balancing compatibility
+      apache2_module:
+        name: proxy
+        state: present
+      notify: restart apache2
 
-    - name: Deploy Apache homepage with required string
-      ansible.builtin.copy:
+    - name: Create Apache index.html with required string
+      copy:
         dest: /var/www/html/index.html
-        mode: '0644'
         content: |
           <!DOCTYPE html>
           <html>
           <head>
-              <title>Apache node</title>
+              <title>Apache Node</title>
           </head>
           <body>
-              <h1>Apache 2 node</h1>
+              <h1>Apache Web Server - Node 2</h1>
               <p>jyidngaysqja</p>
           </body>
           </html>
+        owner: www-data
+        group: www-data
+        mode: '0644'
+      notify: restart apache2
 
-- name: Configure Tomcat 9.0.35 on node3
+    - name: Enable and start apache2
+      systemd:
+        name: apache2
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+  handlers:
+    - name: restart apache2
+      systemd:
+        name: apache2
+        state: restarted
+
+# ================================
+# TOMCAT SERVER (node3.local)
+# ================================
+- name: Configure tomcat web server
   hosts: node3.local
-  become: true
+  become: yes
+  gather_facts: yes
+
   vars:
     tomcat_version: "9.0.35"
-    tomcat_base_dir: "/usr/local"
-    tomcat_install_dir: "/usr/local/apache-tomcat-9.0.35"
-    tomcat_download_url: "https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.35/bin/apache-tomcat-9.0.35.tar.gz"
+    tomcat_dir: "/usr/local/apache-tomcat-{{ tomcat_version }}"
+    tomcat_user: tomcat
+    tomcat_group: tomcat
+
   tasks:
-    - name: Ensure required packages are present
-      ansible.builtin.apt:
-        name:
-          - default-jdk
-          - curl
-        state: present
+    - name: Update apt cache
+      apt:
         update_cache: yes
+        cache_valid_time: 3600
 
-    - name: Create Tomcat group
-      ansible.builtin.group:
-        name: tomcat
+    - name: Install OpenJDK
+      apt:
+        name: default-jdk
         state: present
 
-    - name: Create Tomcat user
-      ansible.builtin.user:
-        name: tomcat
-        group: tomcat
-        home: "{{ tomcat_install_dir }}"
+    - name: Create tomcat system user
+      user:
+        name: "{{ tomcat_user }}"
         shell: /bin/false
+        home: /opt/tomcat
+        createhome: no
         state: present
 
-    - name: Create Tomcat base directory
-      ansible.builtin.file:
-        path: "{{ tomcat_base_dir }}"
+    - name: Download Tomcat 9.0.35
+      get_url:
+        url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        mode: '0644'
+        timeout: 120
+
+    - name: Extract Tomcat to /usr/local
+      unarchive:
+        src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        dest: /usr/local
+        remote_src: yes
+        creates: "{{ tomcat_dir }}"
+
+    - name: Set Tomcat directory permissions
+      file:
+        path: "{{ tomcat_dir }}"
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_group }}"
+        mode: '0755'
+        recurse: yes
+
+    - name: Create Tomcat ROOT webapp directory
+      file:
+        path: "{{ tomcat_dir }}/webapps/ROOT"
         state: directory
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_group }}"
         mode: '0755'
 
-    - name: Download Tomcat archive
-      ansible.builtin.get_url:
-        url: "{{ tomcat_download_url }}"
-        dest: /tmp/apache-tomcat-{{ tomcat_version }}.tar.gz
-        mode: '0644'
-
-    - name: Extract Tomcat
-      ansible.builtin.unarchive:
-        src: /tmp/apache-tomcat-{{ tomcat_version }}.tar.gz
-        dest: "{{ tomcat_base_dir }}"
-        remote_src: yes
-        creates: "{{ tomcat_install_dir }}"
-
-    - name: Set ownership on Tomcat directory
-      ansible.builtin.file:
-        path: "{{ tomcat_install_dir }}"
-        state: directory
-        recurse: yes
-        owner: tomcat
-        group: tomcat
-
-    - name: Create Tomcat systemd service
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/tomcat.service
-        mode: '0644'
-        content: |
-          [Unit]
-          Description=Apache Tomcat 9.0.35
-          After=network.target
-
-          [Service]
-          Type=simple
-          User=tomcat
-          Group=tomcat
-          Environment=JAVA_HOME=/usr/lib/jvm/default-java
-          Environment=CATALINA_HOME={{ tomcat_install_dir }}
-          Environment=CATALINA_BASE={{ tomcat_install_dir }}
-          ExecStart={{ tomcat_install_dir }}/bin/catalina.sh run
-          ExecStop={{ tomcat_install_dir }}/bin/catalina.sh stop
-          Restart=on-failure
-
-          [Install]
-          WantedBy=multi-user.target
-      notify: Reload systemd
-
-    - name: Deploy Tomcat ROOT homepage with required string
-      ansible.builtin.copy:
-        dest: "{{ tomcat_install_dir }}/webapps/ROOT/index.html"
-        owner: tomcat
-        group: tomcat
-        mode: '0644'
+    - name: Create Tomcat index.html with required string
+      copy:
+        dest: "{{ tomcat_dir }}/webapps/ROOT/index.html"
         content: |
           <!DOCTYPE html>
           <html>
           <head>
-              <title>Tomcat node</title>
+              <title>Tomcat Node</title>
           </head>
           <body>
-              <h1>Tomcat node</h1>
+              <h1>Tomcat Web Server - Node 3</h1>
               <p>nruznijciesi</p>
           </body>
           </html>
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_group }}"
+        mode: '0644'
 
-    - name: Ensure Tomcat service is enabled and running
-      ansible.builtin.systemd:
-        name: tomcat
-        daemon_reload: yes
-        state: started
-        enabled: yes
+    - name: Start Tomcat
+      shell: |
+        export JAVA_HOME=/usr/lib/jvm/default-java
+        {{ tomcat_dir }}/bin/startup.sh
+      become_user: "{{ tomcat_user }}"
+      environment:
+        JAVA_HOME: /usr/lib/jvm/default-java
+      register: tomcat_startup
+      changed_when: true
 
-  handlers:
-    - name: Reload systemd
-      ansible.builtin.systemd:
-        daemon_reload: yes
+    - name: Wait for Tomcat to start on port 8080
+      wait_for:
+        port: 8080
+        delay: 3
+        timeout: 30
+        host: localhost
+
+    - name: Verify Tomcat is running
+      uri:
+        url: http://localhost:8080/
+        status_code: 200
+      register: tomcat_response
+      retries: 5
+      delay: 2
