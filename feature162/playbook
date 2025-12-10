@@ -13,7 +13,7 @@
         state: present
         update_cache: yes
 
-    - name: Configure nginx - FIXED PORTS
+    - name: Configure nginx with correct ports
       copy:
         dest: /etc/nginx/nginx.conf
         content: |
@@ -28,8 +28,8 @@
 
           http {
               upstream backend {
-                  server node2.local:80 weight=3;     # Apache
-                  server node3.local:8080 weight=1;   # Tomcat ✓
+                  server node2.local:80 weight=3;
+                  server node3.local:8080 weight=1;
               }
 
               server {
@@ -45,6 +45,8 @@
 
               include /etc/nginx/mime.types;
               default_type application/octet-stream;
+              sendfile on;
+              keepalive_timeout 65;
           }
       notify: restart nginx
 
@@ -55,11 +57,12 @@
         state: restarted
 
 # ================================
-# APACHE (node2.local) - SAME
+# APACHE WEB SERVER (node2.local)
 # ================================
 - name: Configure apache web server
   hosts: node2.local
   become: yes
+
   tasks:
     - name: Install latest apache2
       apt:
@@ -73,18 +76,22 @@
         state: started
         enabled: yes
 
-    - name: Apache index.html
+    - name: Apache index page
       copy:
         dest: /var/www/html/index.html
         content: |
           <html><body>jyidngaysqja</body></html>
+        owner: www-data
+        group: www-data
+        mode: '0644'
 
 # ================================
-# TOMCAT (node3.local) - FIXED
+# TOMCAT SERVER (node3.local)
 # ================================
 - name: Configure tomcat web server
   hosts: node3.local
   become: yes
+
   vars:
     tomcat_version: "9.0.35"
     tomcat_base_dir: "/usr/local/apache-tomcat-{{ tomcat_version }}"
@@ -100,6 +107,7 @@
       get_url:
         url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
         dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        mode: '0644'
 
     - name: Extract Tomcat
       unarchive:
@@ -108,26 +116,20 @@
         remote_src: yes
         creates: "{{ tomcat_base_dir }}"
 
-    - name: ROOT webapp dir
+    - name: Ensure ROOT webapp directory
       file:
         path: "{{ tomcat_base_dir }}/webapps/ROOT"
         state: directory
         mode: '0755'
 
-    - name: Tomcat index.html
+    - name: Tomcat index page
       copy:
         dest: "{{ tomcat_base_dir }}/webapps/ROOT/index.html"
         content: |
           <html><body>nruznijciesi</body></html>
+        mode: '0644'
 
     - name: Start Tomcat
       command: "{{ tomcat_base_dir }}/bin/startup.sh"
       args:
         chdir: "{{ tomcat_base_dir }}"
-
-    - name: Wait for Tomcat 8080 ✓
-      wait_for:
-        port: 8080      # ✅ CORRECT PORT
-        delay: 5
-        timeout: 30
-        host: 0.0.0.0   # ✅ localhost on node3
