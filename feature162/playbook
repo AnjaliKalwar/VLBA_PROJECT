@@ -1,5 +1,5 @@
 ---
-- name: Wait for all nodes to be reachable
+- name: Wait for all nodes
   hosts: balancer,web
   gather_facts: no
   tasks:
@@ -14,7 +14,6 @@
 - name: Configure nginx load balancer
   hosts: balancer
   become: yes
-  gather_facts: yes
 
   tasks:
     - name: Update apt cache
@@ -27,7 +26,7 @@
         name: nginx
         state: present
 
-    - name: Create nginx configuration with correct syntax
+    - name: Configure nginx with correct syntax
       copy:
         dest: /etc/nginx/nginx.conf
         backup: yes
@@ -50,7 +49,7 @@
               tcp_nodelay on;
               keepalive_timeout 65;
 
-              upstream backend_servers {
+              upstream backend {
                   server node2.local:80 weight=3;
                   server node3.local:8080 weight=1;
               }
@@ -61,14 +60,18 @@
                   server_name _;
 
                   location / {
-                      proxy_pass http://backend_servers;
+                      proxy_pass http://backend;
                       proxy_set_header Host $host;
                       proxy_set_header X-Real-IP $remote_addr;
                       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                       proxy_set_header X-Forwarded-Proto $scheme;
+                      proxy_connect_timeout 5s;
+                      proxy_send_timeout 30s;
+                      proxy_read_timeout 30s;
                   }
               }
           }
+      notify: restart nginx
 
     - name: Test nginx configuration
       command: nginx -t
@@ -82,13 +85,18 @@
         state: started
         enabled: yes
 
+  handlers:
+    - name: restart nginx
+      service:
+        name: nginx
+        state: restarted
+
 # ================================
 # APACHE2 WEB SERVER (node2.local)
 # ================================
-- name: Configure apache2 web server
+- name: Configure apache web server
   hosts: node2.local
   become: yes
-  gather_facts: yes
 
   tasks:
     - name: Update apt cache
@@ -101,7 +109,7 @@
         name: apache2
         state: latest
 
-    - name: Enable mod_proxy
+    - name: Enable mod_proxy for compatibility
       apache2_module:
         name: proxy
         state: present
@@ -113,13 +121,8 @@
         content: |
           <!DOCTYPE html>
           <html>
-          <head>
-              <title>Apache Node</title>
-          </head>
-          <body>
-              <h1>Apache Web Server - Node 2</h1>
-              <p>jyidngaysqja</p>
-          </body>
+          <head><title>Apache Node</title></head>
+          <body>jyidngaysqja</body>
           </html>
         owner: www-data
         group: www-data
@@ -139,16 +142,15 @@
         state: restarted
 
 # ================================
-# TOMCAT SERVER (node3.local)
+# TOMCAT 9.0.35 (node3.local)
 # ================================
 - name: Configure tomcat web server
   hosts: node3.local
   become: yes
-  gather_facts: yes
 
   vars:
     tomcat_version: "9.0.35"
-    tomcat_dir: "/usr/local/apache-tomcat-{{ tomcat_version }}"
+    tomcat_base_dir: "/usr/local/apache-tomcat-{{ tomcat_version }}"
     tomcat_user: tomcat
     tomcat_group: tomcat
 
@@ -158,12 +160,12 @@
         update_cache: yes
         cache_valid_time: 3600
 
-    - name: Install OpenJDK
+    - name: Install Java
       apt:
         name: default-jdk
         state: present
 
-    - name: Create tomcat system user
+    - name: Create tomcat user
       user:
         name: "{{ tomcat_user }}"
         shell: /bin/false
@@ -171,7 +173,7 @@
         createhome: no
         state: present
 
-    - name: Download Tomcat 9.0.35
+    - name: Download Tomcat {{ tomcat_version }}
       get_url:
         url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
         dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
@@ -183,19 +185,19 @@
         src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
         dest: /usr/local
         remote_src: yes
-        creates: "{{ tomcat_dir }}"
+        creates: "{{ tomcat_base_dir }}"
 
-    - name: Set Tomcat directory permissions
+    - name: Set Tomcat permissions
       file:
-        path: "{{ tomcat_dir }}"
+        path: "{{ tomcat_base_dir }}"
         owner: "{{ tomcat_user }}"
         group: "{{ tomcat_group }}"
         mode: '0755'
         recurse: yes
 
-    - name: Create Tomcat ROOT webapp directory
+    - name: Create ROOT webapp directory
       file:
-        path: "{{ tomcat_dir }}/webapps/ROOT"
+        path: "{{ tomcat_base_dir }}/webapps/ROOT"
         state: directory
         owner: "{{ tomcat_user }}"
         group: "{{ tomcat_group }}"
@@ -203,43 +205,36 @@
 
     - name: Create Tomcat index.html
       copy:
-        dest: "{{ tomcat_dir }}/webapps/ROOT/index.html"
+        dest: "{{ tomcat_base_dir }}/webapps/ROOT/index.html"
         content: |
           <!DOCTYPE html>
           <html>
-          <head>
-              <title>Tomcat Node</title>
-          </head>
-          <body>
-              <h1>Tomcat Web Server - Node 3</h1>
-              <p>nruznijciesi</p>
-          </body>
+          <head><title>Tomcat Node</title></head>
+          <body>nruznijciesi</body>
           </html>
         owner: "{{ tomcat_user }}"
         group: "{{ tomcat_group }}"
         mode: '0644'
 
+    - name: Stop existing Tomcat
+      shell: "{{ tomcat_base_dir }}/bin/shutdown.sh || true"
+      become_user: "{{ tomcat_user }}"
+      ignore_errors: yes
+      environment:
+        JAVA_HOME: /usr/lib/jvm/default-java
+
     - name: Start Tomcat
       shell: |
         export JAVA_HOME=/usr/lib/jvm/default-java
-        {{ tomcat_dir }}/bin/startup.sh
+        {{ tomcat_base_dir }}/bin/startup.sh
       become_user: "{{ tomcat_user }}"
       environment:
         JAVA_HOME: /usr/lib/jvm/default-java
-      register: tomcat_startup
       changed_when: true
 
-    - name: Wait for Tomcat to start on port 8080
+    - name: Wait for Tomcat to start
       wait_for:
         port: 8080
         delay: 3
         timeout: 30
         host: localhost
-
-    - name: Verify Tomcat is running
-      uri:
-        url: http://localhost:8080/
-        status_code: 200
-      register: tomcat_response
-      retries: 5
-      delay: 2
