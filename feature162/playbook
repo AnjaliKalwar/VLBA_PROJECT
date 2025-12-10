@@ -1,6 +1,6 @@
 ---
 - name: Wait for all nodes to be reachable
-  hosts: all
+  hosts: balancer,web
   gather_facts: no
   tasks:
     - name: Wait until nodes are up
@@ -77,11 +77,10 @@
       failed_when: nginx_test.rc != 0
 
     - name: Enable and start nginx
-      systemd:
+      service:
         name: nginx
         state: started
         enabled: yes
-        daemon_reload: yes
 
 # ================================
 # APACHE2 WEB SERVER (node2.local)
@@ -102,13 +101,13 @@
         name: apache2
         state: latest
 
-    - name: Enable mod_proxy for load balancing compatibility
+    - name: Enable mod_proxy
       apache2_module:
         name: proxy
         state: present
       notify: restart apache2
 
-    - name: Create Apache index.html with required string
+    - name: Create Apache index.html
       copy:
         dest: /var/www/html/index.html
         content: |
@@ -128,15 +127,14 @@
       notify: restart apache2
 
     - name: Enable and start apache2
-      systemd:
+      service:
         name: apache2
         state: started
         enabled: yes
-        daemon_reload: yes
 
   handlers:
     - name: restart apache2
-      systemd:
+      service:
         name: apache2
         state: restarted
 
@@ -203,7 +201,7 @@
         group: "{{ tomcat_group }}"
         mode: '0755'
 
-    - name: Create Tomcat index.html with required string
+    - name: Create Tomcat index.html
       copy:
         dest: "{{ tomcat_dir }}/webapps/ROOT/index.html"
         content: |
