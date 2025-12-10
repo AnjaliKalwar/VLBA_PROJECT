@@ -1,137 +1,136 @@
 ---
-- name: Setup load balancer and web servers
-  hosts: all
+# Nginx load balancer on node1.local (group: balancer)
+- name: Configure nginx load balancer
+  hosts: balancer
+  become: yes
+
+  tasks:
+    - name: Install nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+
+    - name: Configure nginx worker processes to 1 and upstream
+      copy:
+        dest: /etc/nginx/nginx.conf
+        content: |
+          user www-data;
+          worker_processes 1;
+          pid /run/nginx.pid;
+          include /etc/nginx/modules-enabled/*.conf;
+
+          events {
+              worker_connections 768;
+          }
+
+          http {
+              upstream backend {
+                  server node2.local weight=3;
+                  server node3.local weight=1;
+              }
+
+              server {
+                  listen 80 default_server;
+                  listen [::]:80 default_server;
+
+                  location / {
+                      proxy_pass http://backend;
+                  }
+              }
+
+              include /etc/nginx/mime.types;
+              default_type application/octet-stream;
+              sendfile on;
+              keepalive_timeout 65;
+          }
+      notify: restart nginx
+
+  handlers:
+    - name: restart nginx
+      service:
+        name: nginx
+        state: restarted
+
+# Apache web server on node2.local
+- name: Configure apache web server
+  hosts: node2.local
+  become: yes
+
+  tasks:
+    - name: Install latest apache2
+      apt:
+        name: apache2
+        state: latest
+        update_cache: yes
+
+    - name: Ensure apache2 is enabled and started
+      service:
+        name: apache2
+        state: started
+        enabled: yes
+
+    - name: Create Apache index page with required content
+      copy:
+        dest: /var/www/html/index.html
+        content: |
+          <html>
+          <head><title>Apache node</title></head>
+          <body>
+          jyidngaysqja
+          </body>
+          </html>
+        owner: www-data
+        group: www-data
+        mode: '0644'
+
+# Tomcat 9.0.35 on node3.local
+- name: Configure tomcat web server
+  hosts: node3.local
   become: yes
 
   vars:
-    max_retries: 10
-    retry_delay: 5
-    nginx_log_path: /var/log/nginx/access.log
-    tomcat_log_path: /var/log/tomcat9/catalina.out
-    apache_log_path: /var/log/apache2/access.log
+    tomcat_version: "9.0.35"
+    tomcat_install_dir: "/usr/local"
+    tomcat_base_dir: "/usr/local/apache-tomcat-9.0.35"
 
   tasks:
-
-    - name: Update apt cache
+    - name: Install Java (OpenJDK)
       apt:
-        update_cache: yes
-      when: ansible_os_family == "Debian"
-
-    - name: Install required packages
-      apt:
-        name:
-          - nginx
-          - tomcat9
-          - apache2
+        name: default-jdk
         state: present
-      when: ansible_os_family == "Debian"
+        update_cache: yes
 
-    - name: Ensure SSH is running
-      service:
-        name: ssh
-        state: started
-        enabled: yes
-      register: ssh_service
-      retries: "{{ max_retries }}"
-      delay: "{{ retry_delay }}"
-      until: ssh_service.state == "started"
+    - name: Download Tomcat archive
+      get_url:
+        url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        mode: '0644'
 
-    - name: Ensure Nginx is running
-      service:
-        name: nginx
-        state: started
-        enabled: yes
-      register: nginx_service
-      retries: "{{ max_retries }}"
-      delay: "{{ retry_delay }}"
-      until: nginx_service.state == "started"
+    - name: Extract Tomcat under /usr/local
+      unarchive:
+        src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        dest: "{{ tomcat_install_dir }}"
+        remote_src: yes
+        creates: "{{ tomcat_base_dir }}"
 
-    - name: Ensure Tomcat is running
-      service:
-        name: tomcat9
-        state: started
-        enabled: yes
-      register: tomcat_service
-      retries: "{{ max_retries }}"
-      delay: "{{ retry_delay }}"
-      until: tomcat_service.state == "started"
-
-    - name: Ensure Apache is running
-      service:
-        name: apache2
-        state: started
-        enabled: yes
-      register: apache_service
-      retries: "{{ max_retries }}"
-      delay: "{{ retry_delay }}"
-      until: apache_service.state == "started"
-
-    - name: Wait for Nginx log to appear
-      stat:
-        path: "{{ nginx_log_path }}"
-      register: nginx_log
-      retries: "{{ max_retries }}"
-      delay: "{{ retry_delay }}"
-      until: nginx_log.stat.exists
-
-    - name: Wait for Tomcat log to appear
-      stat:
-        path: "{{ tomcat_log_path }}"
-      register: tomcat_log
-      retries: "{{ max_retries }}"
-      delay: "{{ retry_delay }}"
-      until: tomcat_log.stat.exists
-
-    - name: Wait for Apache log to appear
-      stat:
-        path: "{{ apache_log_path }}"
-      register: apache_log
-      retries: "{{ max_retries }}"
-      delay: "{{ retry_delay }}"
-      until: apache_log.stat.exists
-
-    - name: Debug - confirm all services started
-      debug:
-        msg: |
-          SSH: {{ ssh_service.state }}
-          Nginx: {{ nginx_service.state }}
-          Tomcat: {{ tomcat_service.state }}
-          Apache: {{ apache_service.state }}
-          Nginx log exists: {{ nginx_log.stat.exists }}
-          Tomcat log exists: {{ tomcat_log.stat.exists }}
-          Apache log exists: {{ apache_log.stat.exists }}
-
-    # Additional configuration tasks
-    - name: Deploy Nginx configuration
+    - name: Create simple ROOT index page with required content
       copy:
-        src: files/nginx.conf
-        dest: /etc/nginx/nginx.conf
-      notify: Reload Nginx
+        dest: "{{ tomcat_base_dir }}/webapps/ROOT/index.html"
+        content: |
+          <html>
+          <head><title>Tomcat node</title></head>
+          <body>
+          nruznijciesi
+          </body>
+          </html>
+        owner: root
+        group: root
+        mode: '0644'
 
-    - name: Deploy Tomcat configuration
-      copy:
-        src: files/server.xml
-        dest: /etc/tomcat9/server.xml
-      notify: Restart Tomcat
-
-    - name: Deploy Apache configuration
-      copy:
-        src: files/apache2.conf
-        dest: /etc/apache2/apache2.conf
-      notify: Restart Apache
-
-  handlers:
-    - name: Reload Nginx
-      service:
-        name: nginx
-        state: reloaded
-
-    - name: Restart Tomcat
-      service:
-        name: tomcat9
-        state: restarted
-
-    - name: Restart Apache
-      service:
-        name: apache2
-        state: restarted
+    - name: Start Tomcat in background via startup script
+      command: "{{ tomcat_base_dir }}/bin/startup.sh"
+      args:
+        chdir: "{{ tomcat_base_dir }}"
+      register: tomcat_start
+      changed_when: "'Tomcat started' in tomcat_start.stdout or tomcat_start.rc == 0"
