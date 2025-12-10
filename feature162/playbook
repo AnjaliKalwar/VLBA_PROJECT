@@ -13,7 +13,7 @@
         state: present
         update_cache: yes
 
-    - name: Configure nginx with correct ports
+    - name: Configure nginx - USE HOSTNAMES + IP FALLBACK
       copy:
         dest: /etc/nginx/nginx.conf
         content: |
@@ -40,6 +40,10 @@
                       proxy_pass http://backend;
                       proxy_set_header Host $host;
                       proxy_set_header X-Real-IP $remote_addr;
+                      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                      proxy_connect_timeout 5s;
+                      proxy_send_timeout 30s;
+                      proxy_read_timeout 30s;
                   }
               }
 
@@ -76,17 +80,19 @@
         state: started
         enabled: yes
 
-    - name: Apache index page
+    - name: Apache index page with required string
       copy:
         dest: /var/www/html/index.html
         content: |
-          <html><body>jyidngaysqja</body></html>
+          <html>
+          <body>jyidngaysqja</body>
+          </html>
         owner: www-data
         group: www-data
         mode: '0644'
 
 # ================================
-# TOMCAT SERVER (node3.local)
+# TOMCAT 9.0.35 (node3.local)
 # ================================
 - name: Configure tomcat web server
   hosts: node3.local
@@ -103,31 +109,37 @@
         state: present
         update_cache: yes
 
-    - name: Download Tomcat
+    - name: Download Tomcat {{ tomcat_version }}
       get_url:
         url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
         dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
         mode: '0644'
 
-    - name: Extract Tomcat
+    - name: Extract Tomcat to /usr/local
       unarchive:
         src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
         dest: /usr/local
         remote_src: yes
         creates: "{{ tomcat_base_dir }}"
 
-    - name: Ensure ROOT webapp directory
+    - name: Create ROOT webapp directory
       file:
         path: "{{ tomcat_base_dir }}/webapps/ROOT"
         state: directory
         mode: '0755'
 
-    - name: Tomcat index page
+    - name: Tomcat index page with required string
       copy:
         dest: "{{ tomcat_base_dir }}/webapps/ROOT/index.html"
         content: |
-          <html><body>nruznijciesi</body></html>
+          <html>
+          <body>nruznijciesi</body>
+          </html>
         mode: '0644'
+
+    - name: Stop existing Tomcat instance
+      shell: "{{ tomcat_base_dir }}/bin/shutdown.sh || true"
+      ignore_errors: yes
 
     - name: Start Tomcat
       command: "{{ tomcat_base_dir }}/bin/startup.sh"
