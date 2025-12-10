@@ -1,28 +1,32 @@
 ---
+######################################################################
+# 1) NGINX LOAD BALANCER ON node1.local
+######################################################################
 - name: Configure Nginx Load Balancer
   hosts: node1.local
   become: yes
+
   tasks:
-    - name: Install Nginx [web:3]
+    - name: Install Nginx
       apt:
         name: nginx
         state: present
         update_cache: yes
 
-    - name: Set Nginx worker processes to 1 [web:9]
+    - name: Set Nginx worker processes to 1
       lineinfile:
         path: /etc/nginx/nginx.conf
-        regexp: '^worker_processes '
+        regexp: '^worker_processes'
         line: 'worker_processes 1;'
       notify: Restart Nginx
 
-    - name: Remove default Nginx site configuration
+    - name: Remove default Nginx site
       file:
         path: /etc/nginx/sites-enabled/default
         state: absent
       notify: Restart Nginx
 
-    - name: Configure Load Balancer and Upstream [web:11]
+    - name: Configure weighted load balancer
       copy:
         dest: /etc/nginx/conf.d/load-balancer.conf
         content: |
@@ -33,7 +37,6 @@
 
           server {
               listen 80;
-              server_name localhost;
 
               location / {
                   proxy_pass http://backend;
@@ -49,11 +52,16 @@
         name: nginx
         state: restarted
 
+
+######################################################################
+# 2) APACHE ON node2.local
+######################################################################
 - name: Configure Apache Web Server
   hosts: node2.local
   become: yes
+
   tasks:
-    - name: Install Apache2 Latest [web:8]
+    - name: Install Apache
       apt:
         name: apache2
         state: latest
@@ -61,30 +69,42 @@
 
     - name: Set Apache Homepage
       copy:
-        content: 'jyidngaysqja'
+        content: "jyidngaysqja"
         dest: /var/www/html/index.html
         mode: '0644'
 
+    - name: Start Apache
+      service:
+        name: apache2
+        state: started
+        enabled: yes
+
+
+######################################################################
+# 3) TOMCAT ON node3.local (NO SYSTEMD, ONLY startup.sh)
+######################################################################
 - name: Configure Tomcat Web Server
   hosts: node3.local
   become: yes
+
   vars:
     tomcat_version: "9.0.35"
     tomcat_url: "https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.35/bin/apache-tomcat-9.0.35.tar.gz"
     tomcat_home: "/usr/local/tomcat"
+
   tasks:
-    - name: Install Java [web:19]
+    - name: Install Java
       apt:
         name: default-jdk
         state: present
         update_cache: yes
 
-    - name: Create Tomcat Group
+    - name: Create tomcat group
       group:
         name: tomcat
         state: present
 
-    - name: Create Tomcat User
+    - name: Create tomcat user
       user:
         name: tomcat
         group: tomcat
@@ -92,25 +112,25 @@
         shell: /bin/false
         create_home: no
 
-    - name: Download Tomcat [web:5]
+    - name: Download Tomcat
       get_url:
         url: "{{ tomcat_url }}"
         dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
 
-    - name: Extract Tomcat to /usr/local
+    - name: Extract Tomcat
       unarchive:
         src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
         dest: /usr/local
         remote_src: yes
         creates: "/usr/local/apache-tomcat-{{ tomcat_version }}"
 
-    - name: Create Symlink for Tomcat
+    - name: Create tomcat symlink
       file:
         src: "/usr/local/apache-tomcat-{{ tomcat_version }}"
         dest: "{{ tomcat_home }}"
         state: link
 
-    - name: Set Ownership for Tomcat Directory
+    - name: Fix permissions
       file:
         path: "{{ tomcat_home }}"
         owner: tomcat
@@ -119,44 +139,29 @@
 
     - name: Set Tomcat Homepage
       copy:
-        content: 'nruznijciesi'
+        content: "nruznijciesi"
         dest: "{{ tomcat_home }}/webapps/ROOT/index.html"
         owner: tomcat
         group: tomcat
         mode: '0644'
 
-    - name: Create Systemd Service for Tomcat
-      copy:
-        dest: /etc/systemd/system/tomcat.service
-        content: |
-          [Unit]
-          Description=Apache Tomcat Web Application Container
-          After=network.target
+    - name: Make startup executable
+      file:
+        path: "{{ tomcat_home }}/bin/startup.sh"
+        mode: '0755'
 
-          [Service]
-          Type=forking
-          User=tomcat
-          Group=tomcat
-          Environment="JAVA_HOME=/usr/lib/jvm/default-java"
-          Environment="CATALINA_PID={{ tomcat_home }}/temp/tomcat.pid"
-          Environment="CATALINA_HOME={{ tomcat_home }}"
-          Environment="CATALINA_BASE={{ tomcat_home }}"
-          ExecStart={{ tomcat_home }}/bin/startup.sh
-          ExecStop={{ tomcat_home }}/bin/shutdown.sh
+    ###########################################################
+   
+    #   This works inside Drone containers.
+    ###########################################################
+    - name: Start Tomcat (nohup, idempotent)
+      shell: |
+        if ! pgrep -f "org.apache.catalina.startup.Bootstrap" > /dev/null; then
+          nohup {{ tomcat_home }}/bin/startup.sh >/tmp/tomcat.out 2>&1 &
+        fi
 
-          [Install]
-          WantedBy=multi-user.target
-      notify:
-        - Reload Systemd
-        - Restart Tomcat
-
-  handlers:
-    - name: Reload Systemd
-      systemd:
-        daemon_reload: yes
-
-    - name: Restart Tomcat
-      service:
-        name: tomcat
-        state: restarted
-        enabled: yes
+    - name: Wait for Tomcat port
+      wait_for:
+        port: 8080
+        delay: 2
+        timeout: 40
