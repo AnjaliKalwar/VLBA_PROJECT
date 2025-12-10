@@ -1,205 +1,135 @@
 ---
-- name: Configure Apache2 Web Server on node2.local
-  hosts: node2.local
+# ================================
+# NGINX LOAD BALANCER (node1.local)
+# ================================
+- name: Configure nginx load balancer
+  hosts: balancer
   become: yes
+
   tasks:
-    - name: Ensure Apache2 is installed and running
-      ansible.builtin.apt:
-        name: apache2
+    - name: Install nginx
+      apt:
+        name: nginx
         state: present
         update_cache: yes
-    
-    - name: Create custom Apache2 homepage
-      ansible.builtin.copy:
+
+    - name: Configure nginx with correct ports
+      copy:
+        dest: /etc/nginx/nginx.conf
         content: |
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <title>Apache2 Web Server</title>
-          </head>
-          <body>
-              <h1>Welcome to Apache2</h1>
-              <p>This is the homepage for the Apache2 server.</p>
-              <p>Verification string: **jyidngaysqja**</p>
-          </body>
-          </html>
-        dest: /var/www/html/index.html
-        owner: root
-        group: root
-        mode: '0644'
-      notify: Restart Apache2
+          user www-data;
+          worker_processes 1;
+          pid /run/nginx.pid;
+          include /etc/nginx/modules-enabled/*.conf;
+
+          events {
+              worker_connections 768;
+          }
+
+          http {
+              upstream backend {
+                  server node2.local:80 weight=3;
+                  server node3.local:8080 weight=1;
+              }
+
+              server {
+                  listen 80 default_server;
+                  listen [::]:80 default_server;
+
+                  location / {
+                      proxy_pass http://backend;
+                      proxy_set_header Host $host;
+                      proxy_set_header X-Real-IP $remote_addr;
+                  }
+              }
+
+              include /etc/nginx/mime.types;
+              default_type application/octet-stream;
+              sendfile on;
+              keepalive_timeout 65;
+          }
+      notify: restart nginx
 
   handlers:
-    - name: Restart Apache2
-      ansible.builtin.service:
-        name: apache2
+    - name: restart nginx
+      service:
+        name: nginx
         state: restarted
 
-- name: Configure Tomcat Web Server on node3.local
-  hosts: node3.local
+# ================================
+# APACHE WEB SERVER (node2.local)
+# ================================
+- name: Configure apache web server
+  hosts: node2.local
   become: yes
-  vars:
-    tomcat_version: 9.0.35
-    tomcat_install_dir: /usr/local/tomcat
-    java_package: default-jdk
-    # URL for Tomcat 9.0.35 from Apache's archives
-    tomcat_archive_url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
-    
+
   tasks:
-    - name: Install Java Development Kit (required for Tomcat)
-      ansible.builtin.apt:
-        name: "{{ java_package }}"
-        state: present
+    - name: Install latest apache2
+      apt:
+        name: apache2
+        state: latest
         update_cache: yes
 
-    - name: Download and unpack Tomcat archive
-      ansible.builtin.unarchive:
-        src: "{{ tomcat_archive_url }}"
-        dest: /usr/local
-        remote_src: yes
-        owner: root
-        group: root
-        # Rename the extracted folder to a fixed path /usr/local/tomcat
-      ansible.builtin.command: mv /usr/local/apache-tomcat-{{ tomcat_version }} {{ tomcat_install_dir }}
-      args:
-        creates: "{{ tomcat_install_dir }}"
-
-    - name: Create tomcat user for running the service (best practice)
-      ansible.builtin.user:
-        name: tomcat
-        shell: /bin/false
-        create_home: no
-        state: present
-
-    - name: Set correct ownership for Tomcat installation
-      ansible.builtin.file:
-        path: "{{ tomcat_install_dir }}"
-        owner: tomcat
-        group: tomcat
-        recurse: yes
-
-    - name: Setup a simple systemd service file for Tomcat
-      ansible.builtin.copy:
-        content: |
-          [Unit]
-          Description=Apache Tomcat Web Application Container
-          After=network.target
-
-          [Service]
-          Type=forking
-          User=tomcat
-          Group=tomcat
-          Environment="JAVA_HOME=/usr/lib/jvm/default-java"
-          Environment="CATALINA_PID={{ tomcat_install_dir }}/tomcat.pid"
-          Environment="CATALINA_HOME={{ tomcat_install_dir }}"
-          Environment="CATALINA_BASE={{ tomcat_install_dir }}"
-          ExecStart={{ tomcat_install_dir }}/bin/startup.sh
-          ExecStop={{ tomcat_install_dir }}/bin/shutdown.sh
-          Restart=always
-
-          [Install]
-          WantedBy=multi-user.target
-        dest: /etc/systemd/system/tomcat.service
-        owner: root
-        group: root
-        mode: '0644'
-      notify: 
-        - Reload systemd
-        - Start Tomcat
-
-    - name: Create custom Tomcat homepage
-      ansible.builtin.copy:
-        content: |
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <title>Tomcat Web Server</title>
-          </head>
-          <body>
-              <h1>Welcome to Tomcat</h1>
-              <p>This is the homepage for the Tomcat server.</p>
-              <p>Verification string: **nruznijciesi**</p>
-          </body>
-          </html>
-        dest: "{{ tomcat_install_dir }}/webapps/ROOT/index.jsp"
-        owner: tomcat
-        group: tomcat
-        mode: '0644'
-      notify: Start Tomcat
-
-  handlers:
-    - name: Reload systemd
-      ansible.builtin.systemd:
-        daemon_reload: yes
-
-    - name: Start Tomcat
-      ansible.builtin.service:
-        name: tomcat
+    - name: Ensure apache2 running
+      service:
+        name: apache2
         state: started
         enabled: yes
 
-- name: Configure Nginx Load Balancer on node1.local
-  hosts: node1.local
+    - name: Apache index page
+      copy:
+        dest: /var/www/html/index.html
+        content: |
+          <html><body>jyidngaysqja</body></html>
+        owner: www-data
+        group: www-data
+        mode: '0644'
+
+# ================================
+# TOMCAT SERVER (node3.local)
+# ================================
+- name: Configure tomcat web server
+  hosts: node3.local
   become: yes
+
+  vars:
+    tomcat_version: "9.0.35"
+    tomcat_base_dir: "/usr/local/apache-tomcat-{{ tomcat_version }}"
+
   tasks:
-    - name: Ensure Nginx is installed
-      ansible.builtin.apt:
-        name: nginx
+    - name: Install Java
+      apt:
+        name: default-jdk
         state: present
         update_cache: yes
-      
-    - name: Remove default Nginx virtual host file
-      ansible.builtin.file:
-        path: /etc/nginx/sites-enabled/default
-        state: absent
-      notify: Restart Nginx
 
-    - name: Configure Nginx workers (one worker process)
-      ansible.builtin.lineinfile:
-        path: /etc/nginx/nginx.conf
-        regexp: '^worker_processes'
-        line: 'worker_processes 1;'
-        state: present
-      notify: Restart Nginx
-
-    - name: Configure Nginx Load Balancer VHost
-      ansible.builtin.copy:
-        content: |
-          upstream backend_servers {
-              # Apache2 node on default HTTP port 80, weight 3
-              server node2.local:80 weight=3; 
-              
-              # Tomcat node on default port 8080, weight 1
-              server node3.local:8080 weight=1;
-          }
-
-          server {
-              listen 80;
-              server_name master.local;
-
-              location / {
-                  proxy_pass http://backend_servers; 
-                  proxy_set_header Host $host;
-                  proxy_set_header X-Real-IP $remote_addr;
-                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                  proxy_set_header X-Forwarded-Proto $scheme;
-              }
-          }
-        dest: /etc/nginx/sites-available/load_balancer.conf
-        owner: root
-        group: root
+    - name: Download Tomcat
+      get_url:
+        url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
         mode: '0644'
-      notify: Restart Nginx
 
-    - name: Enable the load balancer VHost
-      ansible.builtin.file:
-        src: /etc/nginx/sites-available/load_balancer.conf
-        dest: /etc/nginx/sites-enabled/load_balancer.conf
-        state: link
-      notify: Restart Nginx
+    - name: Extract Tomcat
+      unarchive:
+        src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        dest: /usr/local
+        remote_src: yes
+        creates: "{{ tomcat_base_dir }}"
 
-  handlers:
-    - name: Restart Nginx
-      ansible.builtin.service:
-        name: nginx
-        state: restarted
+    - name: Ensure ROOT webapp directory
+      file:
+        path: "{{ tomcat_base_dir }}/webapps/ROOT"
+        state: directory
+        mode: '0755'
+
+    - name: Tomcat index page
+      copy:
+        dest: "{{ tomcat_base_dir }}/webapps/ROOT/index.html"
+        content: |
+          <html><body>nruznijciesi</body></html>
+        mode: '0644'
+
+    - name: Start Tomcat
+      command: "{{ tomcat_base_dir }}/bin/startup.sh"
+      args:
+        chdir: "{{ tomcat_base_dir }}"
