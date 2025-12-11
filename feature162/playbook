@@ -1,85 +1,101 @@
 ---
-# Final Ansible Playbook for Exercise 162
-
-- name: Configure Nginx Load Balancer
-  hosts: node1.local
+# ================================
+# NGINX LOAD BALANCER (node1.local)
+# ================================
+- name: Configure nginx load balancer
+  hosts: balancer
   become: yes
+
   tasks:
-    - name: Install Nginx
+    - name: Install nginx
       apt:
         name: nginx
         state: present
         update_cache: yes
 
-    - name: Set Nginx worker processes to 1
-      lineinfile:
-        path: /etc/nginx/nginx.conf
-        regexp: '^worker_processes '
-        line: 'worker_processes 1;'
-      notify: Restart Nginx
-
-    - name: Remove default Nginx site configuration
-      file:
-        path: /etc/nginx/sites-enabled/default
-        state: absent
-      notify: Restart Nginx
-
-    - name: Configure weighted load balancer
+    - name: Configure nginx with correct ports
       copy:
-        dest: /etc/nginx/conf.d/load-balancer.conf
+        dest: /etc/nginx/nginx.conf
         content: |
-          upstream backend {
-              server node2.local:80 weight=3;
-              server node3.local:8080 weight=1;
+          user www-data;
+          worker_processes 1;
+          pid /run/nginx.pid;
+          include /etc/nginx/modules-enabled/*.conf;
+
+          events {
+              worker_connections 768;
           }
 
-          server {
-              listen 80;
-              server_name localhost;
-
-              location / {
-                  proxy_pass http://backend;
-                  proxy_set_header Host $host;
-                  proxy_set_header X-Real-IP $remote_addr;
+          http {
+              upstream backend {
+                  server node2.local:80 weight=3;
+                  server node3.local:8080 weight=1;
               }
+
+              server {
+                  listen 80 default_server;
+                  listen [::]:80 default_server;
+
+                  location / {
+                      proxy_pass http://backend;
+                      proxy_set_header Host $host;
+                      proxy_set_header X-Real-IP $remote_addr;
+                  }
+              }
+
+              include /etc/nginx/mime.types;
+              default_type application/octet-stream;
+              sendfile on;
+              keepalive_timeout 65;
           }
-      notify: Restart Nginx
+      notify: restart nginx
 
   handlers:
-    - name: Restart Nginx
+    - name: restart nginx
       service:
         name: nginx
         state: restarted
 
-- name: Configure Apache Web Server
+# ================================
+# APACHE WEB SERVER (node2.local)
+# ================================
+- name: Configure apache web server
   hosts: node2.local
   become: yes
+
   tasks:
-    - name: Install Apache2
+    - name: Install latest apache2
       apt:
         name: apache2
         state: latest
         update_cache: yes
 
-    - name: Set Apache Homepage
-      copy:
-        content: 'jyidngaysqja'
-        dest: /var/www/html/index.html
-        mode: '0644'
-
-    - name: Ensure Apache is running
+    - name: Ensure apache2 running
       service:
         name: apache2
         state: started
         enabled: yes
 
-- name: Configure Tomcat Web Server
+    - name: Apache index page
+      copy:
+        dest: /var/www/html/index.html
+        content: |
+          <html><body>jyidngaysqja</body></html>
+        owner: www-data
+        group: www-data
+        mode: '0644'
+
+# ================================
+# TOMCAT SERVER (node3.local)
+# ================================
+- name: Configure tomcat web server
   hosts: node3.local
   become: yes
+
   vars:
     tomcat_version: "9.0.35"
-    tomcat_extract_dir: "/usr/local/apache-tomcat-9.0.35"
-    tomcat_home: "/usr/local/tomcat"
+    tomcat_base_dir: "/usr/local/apache-tomcat-{{ tomcat_version }}"
+
   tasks:
     - name: Install Java
       apt:
@@ -87,37 +103,41 @@
         state: present
         update_cache: yes
 
-    - name: Download Tomcat 9.0.35
+    - name: Download Tomcat
       get_url:
-        url: "https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.35/bin/apache-tomcat-9.0.35.tar.gz"
-        dest: /tmp/tomcat.tar.gz
+        url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        mode: '0644'
 
     - name: Extract Tomcat
       unarchive:
-        src: /tmp/tomcat.tar.gz
+        src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
         dest: /usr/local
         remote_src: yes
-        creates: "{{ tomcat_extract_dir }}"
+        creates: "{{ tomcat_base_dir }}"
 
-    - name: Create tomcat symlink
+    - name: Ensure ROOT webapp directory
       file:
-        src: "{{ tomcat_extract_dir }}"
-        dest: "{{ tomcat_home }}"
-        state: link
+        path: "{{ tomcat_base_dir }}/webapps/ROOT"
+        state: directory
+        mode: '0755'
 
-    - name: Fix permissions on extracted Tomcat directory
-      file:
-        path: "{{ tomcat_extract_dir }}"
-        owner: root
-        group: root
-        mode: "0755"
-        recurse: yes
-
-    - name: Set Tomcat Homepage
+    - name: Tomcat index page
       copy:
-        content: 'nruznijciesi'
-        dest: "{{ tomcat_home }}/webapps/ROOT/index.html"
+        dest: "{{ tomcat_base_dir }}/webapps/ROOT/index.html"
+        content: |
+          <html><body>nruznijciesi</body></html>
         mode: '0644'
 
     - name: Start Tomcat
-      shell: "{{ tomcat_home }}/bin/startup.sh"
+      command: "{{ tomcat_base_dir }}/bin/startup.sh"
+      args:
+        chdir: "{{ tomcat_base_dir }}"
+
+    # === FIX APPLIED BELOW ===
+    - name: Wait for Tomcat to start
+      wait_for:
+        port: 8080
+        state: started
+        delay: 5
+        timeout: 60
