@@ -1,11 +1,9 @@
 ---
-######################################################################
-# 1) NGINX LOAD BALANCER ON node1.local
-######################################################################
+# Final Ansible Playbook for Exercise 162
+
 - name: Configure Nginx Load Balancer
   hosts: node1.local
   become: yes
-
   tasks:
     - name: Install Nginx
       apt:
@@ -16,11 +14,11 @@
     - name: Set Nginx worker processes to 1
       lineinfile:
         path: /etc/nginx/nginx.conf
-        regexp: '^worker_processes'
+        regexp: '^worker_processes '
         line: 'worker_processes 1;'
       notify: Restart Nginx
 
-    - name: Remove default Nginx site
+    - name: Remove default Nginx site configuration
       file:
         path: /etc/nginx/sites-enabled/default
         state: absent
@@ -37,6 +35,7 @@
 
           server {
               listen 80;
+              server_name localhost;
 
               location / {
                   proxy_pass http://backend;
@@ -52,16 +51,11 @@
         name: nginx
         state: restarted
 
-
-######################################################################
-# 2) APACHE ON node2.local
-######################################################################
 - name: Configure Apache Web Server
   hosts: node2.local
   become: yes
-
   tasks:
-    - name: Install Apache
+    - name: Install Apache2
       apt:
         name: apache2
         state: latest
@@ -69,29 +63,23 @@
 
     - name: Set Apache Homepage
       copy:
-        content: "jyidngaysqja"
+        content: 'jyidngaysqja'
         dest: /var/www/html/index.html
         mode: '0644'
 
-    - name: Start Apache
+    - name: Ensure Apache is running
       service:
         name: apache2
         state: started
         enabled: yes
 
-
-######################################################################
-# 3) TOMCAT ON node3.local (NO SYSTEMD, ONLY startup.sh)
-######################################################################
 - name: Configure Tomcat Web Server
   hosts: node3.local
   become: yes
-
   vars:
     tomcat_version: "9.0.35"
-    tomcat_url: "https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.35/bin/apache-tomcat-9.0.35.tar.gz"
+    tomcat_extract_dir: "/usr/local/apache-tomcat-9.0.35"
     tomcat_home: "/usr/local/tomcat"
-
   tasks:
     - name: Install Java
       apt:
@@ -99,69 +87,37 @@
         state: present
         update_cache: yes
 
-    - name: Create tomcat group
-      group:
-        name: tomcat
-        state: present
-
-    - name: Create tomcat user
-      user:
-        name: tomcat
-        group: tomcat
-        home: "{{ tomcat_home }}"
-        shell: /bin/false
-        create_home: no
-
-    - name: Download Tomcat
+    - name: Download Tomcat 9.0.35
       get_url:
-        url: "{{ tomcat_url }}"
-        dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        url: "https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.35/bin/apache-tomcat-9.0.35.tar.gz"
+        dest: /tmp/tomcat.tar.gz
 
     - name: Extract Tomcat
       unarchive:
-        src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        src: /tmp/tomcat.tar.gz
         dest: /usr/local
         remote_src: yes
-        creates: "/usr/local/apache-tomcat-{{ tomcat_version }}"
+        creates: "{{ tomcat_extract_dir }}"
 
     - name: Create tomcat symlink
       file:
-        src: "/usr/local/apache-tomcat-{{ tomcat_version }}"
+        src: "{{ tomcat_extract_dir }}"
         dest: "{{ tomcat_home }}"
         state: link
 
-    - name: Fix permissions
+    - name: Fix permissions on extracted Tomcat directory
       file:
-        path: "{{ tomcat_home }}"
-        owner: tomcat
-        group: tomcat
+        path: "{{ tomcat_extract_dir }}"
+        owner: root
+        group: root
+        mode: "0755"
         recurse: yes
 
     - name: Set Tomcat Homepage
       copy:
-        content: "nruznijciesi"
+        content: 'nruznijciesi'
         dest: "{{ tomcat_home }}/webapps/ROOT/index.html"
-        owner: tomcat
-        group: tomcat
         mode: '0644'
 
-    - name: Make startup executable
-      file:
-        path: "{{ tomcat_home }}/bin/startup.sh"
-        mode: '0755'
-
-    ###########################################################
-   
-    #   This works inside Drone containers.
-    ###########################################################
-    - name: Start Tomcat (nohup, idempotent)
-      shell: |
-        if ! pgrep -f "org.apache.catalina.startup.Bootstrap" > /dev/null; then
-          nohup {{ tomcat_home }}/bin/startup.sh >/tmp/tomcat.out 2>&1 &
-        fi
-
-    - name: Wait for Tomcat port
-      wait_for:
-        port: 8080
-        delay: 2
-        timeout: 40
+    - name: Start Tomcat
+      shell: "{{ tomcat_home }}/bin/startup.sh"
