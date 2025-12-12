@@ -1,8 +1,8 @@
 kind: pipeline
 type: docker
 name: default
-  # Note: Use as long as the reason for this suddenly occurring error
-  #       remains unknown. Also use it if the error suddenly happens during
+  # Note: Use as long as the 'certificate has expired' error
+  #       occurs. Also use it if the error suddenly happens during
   #       productive use after problem free operations
 clone:
   skip_verify: true
@@ -10,114 +10,26 @@ clone:
 
 steps:
 
-- name: decrypt and untar - managing secret solution files
-  # cp. https://hub.docker.com/r/frapsoft/openssl
-  image: frapsoft/openssl
-  environment:
-    KEY:
-      from_secret: key
+- name: example - start changing here
+  image: ubuntu:22.04
   commands:
-  - openssl enc -d -aes-256-cbc -md sha256 -pass env:KEY -in ./${DRONE_BRANCH}/src.tar.enc -out ./${DRONE_BRANCH}/src.tar
-  - tar -xvf ./${DRONE_BRANCH}/src.tar
+  - echo 'this is your starting point and the files cloned to it'
+  - echo '- - - - - - - - - - - - - - - - - - - - - - - - - - - '
+  - echo ''
+  - echo ${DRONE_GIT_HTTP_URL}
+  - echo ${DRONE_BRANCH}
+  - pwd
+  - ls
+  - ls ./${DRONE_BRANCH}
 
-
-- name: build all docker images needed
-  image: docker
-  volumes:
-  - name: dockersock
-    path: /var/run/docker.sock
+- name: check if all files are in place
+  image: ubuntu:22.04
   commands:
-  - docker --version && cd ${DRONE_BRANCH}
-  - docker --version && cd ../src
-  - cp ../feature162/anjali.kalwar.public_key.pub .
-  - docker build --quiet -t ${DRONE_BRANCH}.check -f Dockerfile.python.df .
-  - docker build --quiet -t ${DRONE_BRANCH}.master -f Dockerfile.ubuntu.ansible.sshd.df .
-  - docker build --quiet -t ${DRONE_BRANCH}.node -f Dockerfile.ubuntu.ansible-client.sshd.df .
-  - rm -rf ../src
-  - rm -f ./src.tar
-
-- name: node1.local
-  image: ${DRONE_BRANCH}.node
-    # Note: If an image name is not correct, the Drone runner tries to load it
-    #       from Docker Hub. This will most probably lead to various errors.
-    #       So, better use 'pull: never' instead of 'pull: if-not-exists'.
-  pull: never
-  detach: true
-  commands:
-  - service ssh start
-    # Note: The ssh daemon needs to be started manually since Drone seems to
-    #       start containers as if with '-it' and '/bin/bash' command was used
-  - /bin/bash -c 'while true ; do echo "$(find /var/log/nginx -name *.log | xargs cat)" "$(ansible --version | sed -n 1p) $(service ssh status) on $(hostname -I)" ; sleep 1 ; done'
-    # Note: The '-c' option is needed for bash to interpret the passed
-    #       arguments as bash commands.
-    # Note: Echoing nginx logs seems to be necessary for proper *weighted*
-    #       nginx load balancing.
-
-- name: node2.local
-  image: ${DRONE_BRANCH}.node
-    # Note: If an image name is not correct, the Drone runner tries to load it
-    #       from Docker Hub. This will most probably lead to various errors.
-    #       So, better use 'pull: never' instead of 'pull: if-not-exists'.
-  pull: never
-  detach: true
-  commands:
-  - service ssh start
-    # Note: The ssh daemon needs to be started manually since Drone seems to
-    #       start containers as if with '-it' and '/bin/bash' command was used
-  - /bin/bash -c 'while true ; do echo "$(ansible --version | sed -n 1p) $(service ssh status) on $(hostname -I)" ; sleep 1 ; done'
-    # Note: The '-c' option is needed for bash to interpret the passed
-    #       arguments as bash commands.
-
-- name: node3.local
-  image: ${DRONE_BRANCH}.node
-    # Note: If an image name is not correct, the Drone runner tries to load it
-    #       from Docker Hub. This will most probably lead to various errors.
-    #       So, better use 'pull: never' instead of 'pull: if-not-exists'.
-  pull: never
-  detach: true
-  commands:
-  - service ssh start
-    # Note: The ssh daemon needs to be started manually since Drone seems to
-    #       start containers as if with '-it' and '/bin/bash' command was used
-  - /bin/bash -c 'while true ; do echo "$(service ssh status) on $(hostname -I)" ; sleep 1 ; done'
-    # Note: The '-c' option is needed for bash to interpret the passed
-    #       arguments as bash commands.
-
-- name: master.local
-  image: ${DRONE_BRANCH}.master
-  pull: never
-  commands:
-    # Note: The ssh daemon needs to be started manually since Drone seems to
-    #       start containers as if '-it' and '/bin/bash' command were used
-  - cd ${DRONE_BRANCH}
-  - cp anjali.kalwar.private_key.pem /root/.ssh/id_rsa
-  - chmod 600 /root/.ssh/id_rsa
-    # wait for nodes
-  - ansible-playbook -i inventory wait.playbook
-    # invoke playbook
-  - ansible-playbook -i inventory playbook
-
-- name: decrypt again
-  image: frapsoft/openssl
-  environment:
-    KEY:
-      from_secret: key
-  commands:
-  - openssl enc -d -aes-256-cbc -md sha256 -pass env:KEY -in ./${DRONE_BRANCH}/src.tar.enc -out ./${DRONE_BRANCH}/src.tar
-  - tar -xvf ./${DRONE_BRANCH}/src.tar
-
-- name: check if main worked as expected
-  image: ${DRONE_BRANCH}.check
-  pull: never
-  commands:
-  - cd src
-  - python check.py
-  - sleep 2
-
-volumes:
-- name: dockersock
-  host:
-    path: /var/run/docker.sock
+    - test -f ./${DRONE_BRANCH}/myexercise.md
+    - test -f ./${DRONE_BRANCH}/myexercise.var.md
+    - test -f ./${DRONE_BRANCH}/mydocs.md
+    - test -f ./${DRONE_BRANCH}/mysolution
+    - test -f ./${DRONE_BRANCH}/mycheck
 
 trigger:
   branch:
