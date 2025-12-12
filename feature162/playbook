@@ -1,0 +1,139 @@
+---
+# ================================
+# NGINX LOAD BALANCER (node1.local)
+# ================================
+- name: Configure Nginx Load Balancer
+  hosts: node1.local
+  become: yes
+  tasks:
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+
+    - name: Set Nginx worker processes to 1
+      lineinfile:
+        path: /etc/nginx/nginx.conf
+        regexp: '^worker_processes '
+        line: 'worker_processes 1;'
+      notify: Restart Nginx
+
+    - name: Remove default Nginx site configuration
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: Restart Nginx
+
+    - name: Configure weighted load balancer
+      copy:
+        dest: /etc/nginx/conf.d/load-balancer.conf
+        content: |
+          upstream backend {
+              server node2.local:80 weight=3;
+              server node3.local:8080 weight=1;
+          }
+
+          server {
+              listen 80;
+              server_name localhost;
+
+              location / {
+                  proxy_pass http://backend;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+              }
+          }
+      notify: Restart Nginx
+
+  handlers:
+    - name: Restart Nginx
+      service:
+        name: nginx
+        state: restarted
+
+# ================================
+# APACHE WEB SERVER (node2.local)
+# ================================
+- name: Configure Apache Web Server
+  hosts: node2.local
+  become: yes
+  tasks:
+    - name: Install Apache2
+      apt:
+        name: apache2
+        state: latest
+        update_cache: yes
+
+    - name: Set Apache Homepage
+      copy:
+        content: 'jyidngaysqja'
+        dest: /var/www/html/index.html
+        mode: '0644'
+
+    - name: Ensure Apache is running
+      service:
+        name: apache2
+        state: started
+        enabled: yes
+
+# ================================
+# TOMCAT SERVER (node3.local)
+# ================================
+- name: Configure Tomcat Web Server
+  hosts: node3.local
+  become: yes
+  vars:
+    tomcat_version: "9.0.35"
+    tomcat_extract_dir: "/usr/local/apache-tomcat-9.0.35"
+    tomcat_home: "/usr/local/tomcat"
+  tasks:
+    - name: Install Java
+      apt:
+        name: default-jdk
+        state: present
+        update_cache: yes
+
+    - name: Download Tomcat 9.0.35
+      get_url:
+        url: "https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.35/bin/apache-tomcat-9.0.35.tar.gz"
+        dest: /tmp/tomcat.tar.gz
+
+    - name: Extract Tomcat
+      unarchive:
+        src: /tmp/tomcat.tar.gz
+        dest: /usr/local
+        remote_src: yes
+        creates: "{{ tomcat_extract_dir }}"
+
+    - name: Create tomcat symlink
+      file:
+        src: "{{ tomcat_extract_dir }}"
+        dest: "{{ tomcat_home }}"
+        state: link
+
+    - name: Fix permissions on extracted Tomcat directory
+      file:
+        path: "{{ tomcat_extract_dir }}"
+        owner: root
+        group: root
+        mode: "0755"
+        recurse: yes
+
+    - name: Set Tomcat Homepage
+      copy:
+        content: 'nruznijciesi'
+        dest: "{{ tomcat_home }}/webapps/ROOT/index.html"
+        mode: '0644'
+
+    # Correct way to start Tomcat so it persists after Ansible exits
+    - name: Start Tomcat with nohup
+      shell: "nohup {{ tomcat_home }}/bin/startup.sh > /dev/null 2>&1 &"
+
+    # Pause until the port is actually open to prevent race condition
+    - name: Wait for Tomcat to start
+      wait_for:
+        port: 8080
+        state: started
+        delay: 5
+        timeout: 60
