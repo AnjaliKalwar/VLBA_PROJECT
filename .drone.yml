@@ -41,9 +41,9 @@ steps:
   - name: check-required-files
     image: ubuntu:24.04
     commands:
-      - test -f ./${DRONE_BRANCH}/myexercise.md
-      - test -f ./${DRONE_BRANCH}/myexercise.var.md
-      - test -f ./${DRONE_BRANCH}/mydocs.md
+      - test -f ./${DRONE_BRANCH}/exercise.md
+      - test -f ./${DRONE_BRANCH}/exercise.var.md
+      # - test -f ./${DRONE_BRANCH}/mydocs.md
       - test -f ./${DRONE_BRANCH}/solution.py
       - test -f ./${DRONE_BRANCH}/check.py
 
@@ -68,41 +68,41 @@ steps:
   #         --port 5000 &
   #     - sleep 10
 
-  # # -----------------------------
-  # # NGINX Reverse Proxy
-  # # -----------------------------
-  # - name: nginx
-  #   image: nginx:stable
-  #   depends_on:
-  #     - fastapi
-  #   commands:
-  #     - |
-  #       cat <<EOF > /etc/nginx/nginx.conf
-  #       events {}
-  #       http {
-  #           upstream fastapi_app {
-  #               server fastapi:5000;
-  #           }
+  # -----------------------------
+  # NGINX Reverse Proxy
+  # -----------------------------
+  - name: nginx
+    image: nginx:stable
+    depends_on:
+      - fastapi
+    commands:
+      - |
+        cat <<EOF > /etc/nginx/nginx.conf
+        events {}
+        http {
+            upstream fastapi_app {
+                server fastapi:5000;
+            }
 
-  #           server {
-  #               listen 80;
+            server {
+                listen 80;
 
-  #               location /create_login {
-  #                   proxy_pass http://fastapi_app/create_login;
-  #               }
+                location /create_login {
+                    proxy_pass http://fastapi_app/create_login;
+                }
 
-  #               location /login {
-  #                   proxy_pass http://fastapi_app/login;
-  #               }
+                location /login {
+                    proxy_pass http://fastapi_app/login;
+                }
 
-  #               location /logout {
-  #                   proxy_pass http://fastapi_app/logout;
-  #               }
-  #           }
-  #       }
-  #       EOF
-  #     - nginx
-  #     - sleep 5
+                location /logout {
+                    proxy_pass http://fastapi_app/logout;
+                }
+            }
+        }
+        EOF
+      - nginx
+      - sleep 5
 
   # # -----------------------------
   # # Run Functional Checks
