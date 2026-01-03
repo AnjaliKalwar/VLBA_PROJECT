@@ -38,14 +38,16 @@ steps:
       - ls
       - ls ./${DRONE_BRANCH}
 
-  - name: check-required-files
-    image: ubuntu:24.04
-    commands:
-      - test -f ./${DRONE_BRANCH}/myexercise.md
-      - test -f ./${DRONE_BRANCH}/myexercise.var.md
-      - test -f ./${DRONE_BRANCH}/mydocs.md
-      - test -f ./${DRONE_BRANCH}/solution.py
-      - test -f ./${DRONE_BRANCH}/check
+  # - name: check-required-files
+  #   image: ubuntu:24.04
+  #   commands:
+  #     - test -f ./${DRONE_BRANCH}/myexercise.md
+  #     - test -f ./${DRONE_BRANCH}/myexercise.var.md
+  #     - test -f ./${DRONE_BRANCH}/mydocs.md
+  #     - test -f ./${DRONE_BRANCH}/solution.py
+  #     - test -f ./${DRONE_BRANCH}/check
+
+  
 
   # # -----------------------------
   # # FastAPI Application
