@@ -28,90 +28,90 @@ services:
 # -----------------------------
 # Pipeline Steps
 # -----------------------------
-steps:
+# steps:
 
-  - name: basic-info
-    image: ubuntu:24.04
-    commands:
-      - echo "Repo URL: ${DRONE_GIT_HTTP_URL}"
-      - echo "Branch: ${DRONE_BRANCH}"
-      - ls
-      - ls ./${DRONE_BRANCH}
+  # - name: basic-info
+  #   image: ubuntu:24.04
+  #   commands:
+  #     - echo "Repo URL: ${DRONE_GIT_HTTP_URL}"
+  #     - echo "Branch: ${DRONE_BRANCH}"
+  #     - ls
+  #     - ls ./${DRONE_BRANCH}
 
-  - name: check-required-files
-    image: ubuntu:24.04
-    commands:
-      - test -f ./${DRONE_BRANCH}/myexercise.md
-      - test -f ./${DRONE_BRANCH}/myexercise.var.md
-      - test -f ./${DRONE_BRANCH}/mydocs.md
-      - test -f ./${DRONE_BRANCH}/solution.py
-      - test -f ./${DRONE_BRANCH}/check
+  # - name: check-required-files
+  #   image: ubuntu:24.04
+  #   commands:
+  #     - test -f ./${DRONE_BRANCH}/myexercise.md
+  #     - test -f ./${DRONE_BRANCH}/myexercise.var.md
+  #     - test -f ./${DRONE_BRANCH}/mydocs.md
+  #     - test -f ./${DRONE_BRANCH}/solution.py
+  #     - test -f ./${DRONE_BRANCH}/check
 
-  # -----------------------------
-  # FastAPI Application
-  # -----------------------------
-  - name: fastapi
-    image: python:3.12-slim
-    environment:
-      DB1_HOST: db1
-      DB2_HOST: db2
-      DB_USER: app_user
-      DB_PASS: app_password
-      DB_NAME: login_db
-    commands:
-      - pip install fastapi uvicorn mysql-connector-python
-      - |
-        uvicorn ${DRONE_BRANCH}.solution:app \
-          --host 0.0.0.0 \
-          --port 5000 &
-      - sleep 10
+  # # -----------------------------
+  # # FastAPI Application
+  # # -----------------------------
+  # - name: fastapi
+  #   image: python:3.12-slim
+  #   environment:
+  #     DB1_HOST: db1
+  #     DB2_HOST: db2
+  #     DB_USER: app_user
+  #     DB_PASS: app_password
+  #     DB_NAME: login_db
+  #   commands:
+  #     - pip install fastapi uvicorn mysql-connector-python
+  #     - |
+  #       uvicorn ${DRONE_BRANCH}.solution:app \
+  #         --host 0.0.0.0 \
+  #         --port 5000 &
+  #     - sleep 10
 
-  # -----------------------------
-  # NGINX Reverse Proxy
-  # -----------------------------
-  - name: nginx
-    image: nginx:stable
-    depends_on:
-      - fastapi
-    commands:
-      - |
-        cat <<EOF > /etc/nginx/nginx.conf
-        events {}
-        http {
-            upstream fastapi_app {
-                server fastapi:5000;
-            }
+  # # -----------------------------
+  # # NGINX Reverse Proxy
+  # # -----------------------------
+  # - name: nginx
+  #   image: nginx:stable
+  #   depends_on:
+  #     - fastapi
+  #   commands:
+  #     - |
+  #       cat <<EOF > /etc/nginx/nginx.conf
+  #       events {}
+  #       http {
+  #           upstream fastapi_app {
+  #               server fastapi:5000;
+  #           }
 
-            server {
-                listen 80;
+  #           server {
+  #               listen 80;
 
-                location /create_login {
-                    proxy_pass http://fastapi_app/create_login;
-                }
+  #               location /create_login {
+  #                   proxy_pass http://fastapi_app/create_login;
+  #               }
 
-                location /login {
-                    proxy_pass http://fastapi_app/login;
-                }
+  #               location /login {
+  #                   proxy_pass http://fastapi_app/login;
+  #               }
 
-                location /logout {
-                    proxy_pass http://fastapi_app/logout;
-                }
-            }
-        }
-        EOF
-      - nginx
-      - sleep 5
+  #               location /logout {
+  #                   proxy_pass http://fastapi_app/logout;
+  #               }
+  #           }
+  #       }
+  #       EOF
+  #     - nginx
+  #     - sleep 5
 
-  # -----------------------------
-  # Run Functional Checks
-  # -----------------------------
-  - name: run-checks
-    image: python:3.12-slim
-    environment:
-      API_URL: http://nginx
-    commands:
-      - pip install requests
-      - python ${DRONE_BRANCH}/check
+  # # -----------------------------
+  # # Run Functional Checks
+  # # -----------------------------
+  # - name: run-checks
+  #   image: python:3.12-slim
+  #   environment:
+  #     API_URL: http://nginx
+  #   commands:
+  #     - pip install requests
+  #     - python ${DRONE_BRANCH}/check
 
 # -----------------------------
 # Trigger Rules
