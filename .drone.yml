@@ -6,7 +6,7 @@ clone:
   skip_verify: true
 
 # -----------------------------
-# Detached Services (Databases)
+# Services (Databases only)
 # -----------------------------
 services:
   - name: db1
@@ -48,10 +48,9 @@ steps:
       - test -f ./${DRONE_BRANCH}/solution.py
       - test -f ./${DRONE_BRANCH}/check
 
-  # -------- FastAPI (Detached Server) --------
+  # -------- FastAPI Server --------
   - name: fastapi
     image: ubuntu:24.04
-    detach: true
     environment:
       DB1_HOST: db1
       DB2_HOST: db2
@@ -62,36 +61,36 @@ steps:
       - apt-get update
       - apt-get install -y python3 python3-pip
       - pip3 install fastapi uvicorn mysql-connector-python
-      - python3 ${DRONE_BRANCH}/solution.py
+      - python3 ${DRONE_BRANCH}/solution.py &
+      - sleep 8
 
   # -------- NGINX Reverse Proxy --------
   - name: nginx
     image: nginx:stable
-    detach: true
     commands:
       - |
         cat <<EOF > /etc/nginx/nginx.conf
         events {}
         http {
             upstream fastapi_app {
-                server fastapi:5000;
+                server localhost:5000;
             }
             server {
                 listen 80;
                 location /create_login { proxy_pass http://fastapi_app/create_login; }
                 location /login { proxy_pass http://fastapi_app/login; }
                 location /logout { proxy_pass http://fastapi_app/logout; }
-                location / { return 200 "NGINX reverse proxy running\n"; }
             }
         }
         EOF
-      - nginx -g 'daemon off;'
+      - nginx
+      - sleep 5
 
-  # -------- Checks via NGINX --------
+  # -------- Run checks --------
   - name: run checks
     image: python:3.12-slim
     environment:
-      API_URL: http://nginx
+      API_URL: http://localhost
     commands:
       - pip install requests
       - python ${DRONE_BRANCH}/check
