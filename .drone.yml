@@ -30,22 +30,22 @@ services:
 # -----------------------------
 steps:
 
-  - name: basic-info
-    image: ubuntu:24.04
-    commands:
-      - echo "Repo URL: ${DRONE_GIT_HTTP_URL}"
-      - echo "Branch: ${DRONE_BRANCH}"
-      - ls
-      - ls ./${DRONE_BRANCH}
-
-  # - name: check-required-files
+  # - name: basic-info
   #   image: ubuntu:24.04
   #   commands:
-  #     - test -f ./${DRONE_BRANCH}/myexercise.md
-  #     - test -f ./${DRONE_BRANCH}/myexercise.var.md
-  #     - test -f ./${DRONE_BRANCH}/mydocs.md
-  #     - test -f ./${DRONE_BRANCH}/solution.py
-  #     - test -f ./${DRONE_BRANCH}/check
+  #     - echo "Repo URL: ${DRONE_GIT_HTTP_URL}"
+  #     - echo "Branch: ${DRONE_BRANCH}"
+  #     - ls
+  #     - ls ./${DRONE_BRANCH}
+
+  - name: check-required-files
+    image: ubuntu:24.04
+    commands:
+      - test -f ./${DRONE_BRANCH}/myexercise.md
+      - test -f ./${DRONE_BRANCH}/myexercise.var.md
+      - test -f ./${DRONE_BRANCH}/mydocs.md
+      - test -f ./${DRONE_BRANCH}/solution.py
+      - test -f ./${DRONE_BRANCH}/check.py
 
   
 
