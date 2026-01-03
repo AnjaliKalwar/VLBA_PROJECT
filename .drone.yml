@@ -115,4 +115,5 @@ steps:
 # -----------------------------
 trigger:
   branch:
-    - feature*
+    include:
+      - feature*
