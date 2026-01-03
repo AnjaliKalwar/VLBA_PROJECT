@@ -1,24 +1,27 @@
 FROM ubuntu:24.04
 
-# Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install Python
+# Install Python + venv
 RUN apt-get update && \
-    apt-get install -y python3 python3-pip && \
+    apt-get install -y python3 python3-venv python3-pip && \
     rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
-# Install Python dependencies
-RUN pip3 install fastapi uvicorn mysql-connector-python
+# Create virtual environment
+RUN python3 -m venv /opt/venv
 
-# Copy application code
+# Activate venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install dependencies INSIDE venv (PEP 668 compliant)
+RUN pip install fastapi uvicorn mysql-connector-python
+
+# Copy application
 COPY solution.py .
 
-# Expose FastAPI port
 EXPOSE 5000
 
-# Run the application
-CMD ["python3", "solution.py"]
+# Run application
+CMD ["python", "solution.py"]
