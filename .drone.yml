@@ -60,10 +60,7 @@ steps:
     depends_on:
       - check-required-files
     commands:
-      - docker build --network=host \
-          -t fastapi-app \
-          -f ${DRONE_BRANCH}/Dockerfile \
-          ${DRONE_BRANCH}
+      - docker build --network=host -t fastapi-app -f ${DRONE_BRANCH}/Dockerfile ${DRONE_BRANCH}
 
   # -----------------------------
   # Run FastAPI Container
