@@ -52,8 +52,17 @@ steps:
   # # -----------------------------
   # # FastAPI Application
   # # -----------------------------
-  - name: fastapi
-    image: ubuntu:24.04
+  - name: build-fastapi
+    image: docker:24
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    commands:
+      - docker build -t fastapi-app -f ${DRONE_BRANCH}/Dockerfile ${DRONE_BRANCH}
+
+  - name: run-fastapi
+    image: docker:24
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       DB1_HOST: db1
       DB2_HOST: db2
@@ -61,13 +70,11 @@ steps:
       DB_PASS: app_password
       DB_NAME: login_db
     commands:
-      - apt-get update
-      - apt-get install -y python3 python3-pip
-      - python3 --version
-      - pip3 install fastapi uvicorn mysql-connector-python
-      - |
-        python3 ${DRONE_BRANCH}/solution.py &
-      - sleep 10
+      - docker run -d \
+          --name fastapi \
+          --network host \
+          fastapi-app
+
 
   # -----------------------------
   # NGINX Reverse Proxy
