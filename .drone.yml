@@ -79,7 +79,9 @@ steps:
       DB_PASS: app_password
       DB_NAME: login_db
     commands:
-      - docker run --name fastapi -e DB1_HOST=db1 -e DB2_HOST=db2 -e DB_USER=app_user -e DB_PASS=app_password -e DB_NAME=login_db fastapi-app
+      - docker rm -f fastapi || true
+      - docker run -d --name fastapi -e DB1_HOST=db1 -e DB2_HOST=db2 -e DB_USER=app_user -e DB_PASS=app_password -e DB_NAME=login_db fastapi-app
+      - docker logs fastapi
 
   # -----------------------------
   # Run NGINX Container
