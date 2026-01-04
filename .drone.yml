@@ -103,7 +103,7 @@ steps:
     depends_on:
       - run-nginx
     environment:
-      API_URL: http://nginx
+      API_URL: http://localhost
     commands:
       - pip install requests mysql-connector-python
       - python ${DRONE_BRANCH}/check.py
