@@ -94,8 +94,8 @@ steps:
     depends_on:
       - run-fastapi
     commands:
-      - docker run -d --name nginx -p 80:80 -v $(pwd)/${DRONE_BRANCH}/nginx.conf:/etc/nginx/nginx.conf:ro nginx:stable
-
+      - docker rm -f nginx || true
+      - docker run -d --name nginx -p 80:80 -v $(pwd)/${DRONE_BRANCH}:/etc/nginx nginx:stable
 
 # -----------------------------
 # Trigger Rules
