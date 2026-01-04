@@ -81,6 +81,7 @@ steps:
     commands:
       - docker rm -f fastapi || true
       - docker run -d --name fastapi -e DB1_HOST=db1 -e DB2_HOST=db2 -e DB_USER=app_user -e DB_PASS=app_password -e DB_NAME=login_db fastapi-app
+      - sleep 3
       - docker logs fastapi
 
   # -----------------------------
@@ -96,6 +97,17 @@ steps:
     commands:
       - docker rm -f nginx || true
       - docker run -d --name nginx -p 80:80 -v $(pwd)/${DRONE_BRANCH}:/etc/nginx nginx:stable
+  
+  - name: run-checks
+    image: python:3.12-slim
+    depends_on:
+      - run-nginx
+    environment:
+      API_URL: http://nginx
+    commands:
+      - pip install requests mysql-connector-python
+      - python ${DRONE_BRANCH}/check.py
+
 
 # -----------------------------
 # Trigger Rules
