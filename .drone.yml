@@ -129,14 +129,17 @@ steps:
     commands:
       - pip install requests mysql-connector-python
       - |
-        for i in 1 2 3 4 5; do
-          echo "Waiting for nginx (attempt $i)..."
-          if curl -s http://localhost >/dev/null; then
-            echo "nginx is ready"
-            break
-          fi
-          sleep 2
-        done
+        python - <<'EOF'
+        import time, requests
+        for i in range(5):
+            try:
+                r = requests.get("http://localhost", timeout=1)
+                print("nginx is ready")
+                break
+            except Exception as e:
+                print(f"waiting for nginx ({i+1})")
+                time.sleep(2)
+        EOF
       - python ${DRONE_BRANCH}/check.py
 
 # -----------------------------
