@@ -83,8 +83,6 @@ steps:
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
-    depends_on:
-      - run-nginx
     commands:
       - |
         docker run --rm \
@@ -95,7 +93,7 @@ steps:
           python:3.12-slim \
           sh -c "
             pip install requests mysql-connector-python &&
-            python check.py
+            python feature190/check.py
           "
 
             python ${DRONE_BRANCH}/check.py
