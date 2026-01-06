@@ -88,7 +88,7 @@ steps:
         docker run --rm \
           --network appnet \
           -e API_URL=http://nginx \
-          -v $(pwd):/workspace \
+          -v /drone/src:/workspace \
           -w /workspace \
           python:3.12-slim \
           sh -c "
