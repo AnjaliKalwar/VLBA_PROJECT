@@ -88,6 +88,8 @@ steps:
         docker run --rm \
           --network appnet \
           -e API_URL=http://nginx \
+          -v $(pwd):/workspace \
+          -w /workspace \
           python:3.12-slim \
           sh -c "
             pip install requests mysql-connector-python &&
