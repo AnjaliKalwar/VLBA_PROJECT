@@ -44,10 +44,10 @@ steps:
   - name: check-required-files
     image: ubuntu:24.04
     commands:
-      - "test -f ./${DRONE_BRANCH}/exercise.md"
-      - "test -f ./${DRONE_BRANCH}/exercise.var.md"
-      - "test -f ./${DRONE_BRANCH}/solution.py"
-      - "test -f ./${DRONE_BRANCH}/check.py"
+      - test -f ./${DRONE_BRANCH}/exercise.md
+      - test -f ./${DRONE_BRANCH}/exercise.var.md
+      - test -f ./${DRONE_BRANCH}/solution.py
+      - test -f ./${DRONE_BRANCH}/check.py
 
   # -----------------------------
   # Build FastAPI Image
@@ -57,8 +57,10 @@ steps:
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
+    depends_on:
+      - check-required-files
     commands:
-      - docker build -t fastapi-app -f ${DRONE_BRANCH}/Dockerfile ${DRONE_BRANCH}
+      - docker build --network=host -t fastapi-app -f ${DRONE_BRANCH}/Dockerfile ${DRONE_BRANCH}
 
   # -----------------------------
   # Run FastAPI Container
@@ -68,6 +70,8 @@ steps:
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
+    depends_on:
+      - build-fastapi
     environment:
       DB1_HOST: db1
       DB2_HOST: db2
@@ -75,14 +79,20 @@ steps:
       DB_PASS: app_password
       DB_NAME: login_db
     commands:
-      - docker run -d \
-          --name fastapi \
+      - docker network create appnet || true
+      - docker rm -f fastapi || true
+      - |
+        docker run -d --name fastapi \
+          --network appnet \
+          -p 5000:5000 \
           -e DB1_HOST=db1 \
           -e DB2_HOST=db2 \
           -e DB_USER=app_user \
           -e DB_PASS=app_password \
           -e DB_NAME=login_db \
           fastapi-app
+      - sleep 3
+      - docker logs fastapi
 
   # -----------------------------
   # Run NGINX Container
@@ -95,11 +105,38 @@ steps:
     depends_on:
       - run-fastapi
     commands:
-      - docker run -d \
-          --name nginx \
+      - docker rm -f nginx || true
+      - |
+        docker run -d --name nginx \
+          --network appnet \
           -p 80:80 \
-          -v ${DRONE_BRANCH}/nginx.conf:/etc/nginx/nginx.conf:ro \
+          -v $(pwd)/${DRONE_BRANCH}/nginx.conf:/etc/nginx/conf.d/default.conf:ro \
           nginx:stable
+      - sleep 2
+      - docker logs nginx
+
+
+  # -----------------------------
+  # Run Functional Checks
+  # -----------------------------
+  - name: run-checks
+    image: python:3.12-slim
+    depends_on:
+      - run-nginx
+    environment:
+      API_URL: http://localhost
+    commands:
+      - pip install requests mysql-connector-python
+      - |
+        for i in 1 2 3 4 5; do
+          echo "Waiting for nginx (attempt $i)..."
+          if curl -s http://localhost >/dev/null; then
+            echo "nginx is ready"
+            break
+          fi
+          sleep 2
+        done
+      - python ${DRONE_BRANCH}/check.py
 
 # -----------------------------
 # Trigger Rules
