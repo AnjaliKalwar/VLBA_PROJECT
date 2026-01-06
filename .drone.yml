@@ -79,18 +79,21 @@ steps:
 
   
   - name: run-checks
-    image: docker:24                     # use docker image
+    image: docker:24
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
     commands:
       - |
         docker run --rm \
-          --network appnet \             
-          -e API_URL=http://nginx \       
+          --network appnet \
+          -e API_URL=http://nginx \
           python:3.12-slim \
           sh -c "
             pip install requests mysql-connector-python &&
+            python feature190/check.py
+          "
+
             python ${DRONE_BRANCH}/check.py
           "
 
