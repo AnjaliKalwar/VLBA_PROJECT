@@ -77,7 +77,7 @@ steps:
           nginx:stable
       - docker logs nginx
 
-  # ✅ FIXED STEP
+  
   - name: run-checks
     image: docker:24                     # use docker image
     volumes:
