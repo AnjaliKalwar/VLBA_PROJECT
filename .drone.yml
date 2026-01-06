@@ -44,10 +44,10 @@ steps:
   - name: check-required-files
     image: ubuntu:24.04
     commands:
-      - "test -f ./${DRONE_BRANCH}/exercise.md"
-      - "test -f ./${DRONE_BRANCH}/exercise.var.md"
-      - "test -f ./${DRONE_BRANCH}/solution.py"
-      - "test -f ./${DRONE_BRANCH}/check.py"
+      - test -f ./${DRONE_BRANCH}/exercise.md
+      - test -f ./${DRONE_BRANCH}/exercise.var.md
+      - test -f ./${DRONE_BRANCH}/solution.py
+      - test -f ./${DRONE_BRANCH}/check.py
 
   # -----------------------------
   # Build FastAPI Image
@@ -79,8 +79,18 @@ steps:
       DB_PASS: app_password
       DB_NAME: login_db
     commands:
+      - docker network create appnet || true
       - docker rm -f fastapi || true
-      - docker run -d --name fastapi -e DB1_HOST=db1 -e DB2_HOST=db2 -e DB_USER=app_user -e DB_PASS=app_password -e DB_NAME=login_db fastapi-app
+      - |
+        docker run -d --name fastapi \
+          --network appnet \
+          -p 5000:5000 \
+          -e DB1_HOST=db1 \
+          -e DB2_HOST=db2 \
+          -e DB_USER=app_user \
+          -e DB_PASS=app_password \
+          -e DB_NAME=login_db \
+          fastapi-app
       - sleep 3
       - docker logs fastapi
 
@@ -96,8 +106,18 @@ steps:
       - run-fastapi
     commands:
       - docker rm -f nginx || true
-      - docker run -d --name nginx -p 80:80 -v $(pwd)/${DRONE_BRANCH}:/etc/nginx nginx:stable
-  
+      - |
+        docker run -d --name nginx \
+          --network appnet \
+          -p 80:80 \
+          -v $(pwd)/${DRONE_BRANCH}/nginx.conf:/etc/nginx/nginx.conf:ro \
+          nginx:stable
+      - sleep 2
+      - docker logs nginx
+
+  # -----------------------------
+  # Run Functional Checks
+  # -----------------------------
   - name: run-checks
     image: python:3.12-slim
     depends_on:
@@ -106,8 +126,16 @@ steps:
       API_URL: http://localhost
     commands:
       - pip install requests mysql-connector-python
+      - |
+        for i in 1 2 3 4 5; do
+          echo "Waiting for nginx (attempt $i)..."
+          if curl -s http://localhost >/dev/null; then
+            echo "nginx is ready"
+            break
+          fi
+          sleep 2
+        done
       - python ${DRONE_BRANCH}/check.py
-
 
 # -----------------------------
 # Trigger Rules
