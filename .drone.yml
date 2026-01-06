@@ -89,11 +89,13 @@ steps:
           --network appnet \
           -e API_URL=http://nginx \
           -v /drone/src:/workspace \
-          -w /workspace \
+          -w /workspace/${DRONE_BRANCH} \
           python:3.12-slim \
           sh -c "
             pip install requests mysql-connector-python &&
-            python feature190/check.py
+            python check.py
+          "
+
           "
 
 
