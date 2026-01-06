@@ -93,7 +93,7 @@ steps:
           python:3.12-slim \
           sh -c "
             pip install requests mysql-connector-python &&
-            python feature190/check.py
+            python ${DRONE_BRANCH}/check.py
           "
 
 
