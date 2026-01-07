@@ -60,6 +60,9 @@ steps:
           -e DB_USER=app_user \
           -e DB_PASS=app_password \
           -e DB_NAME=login_db \
+          -e API_URL=http://nginx \
+          -v /drone/src:/workspace \
+          -w /workspace \
           fastapi-app
       - docker logs fastapi
 
@@ -77,26 +80,30 @@ steps:
           nginx:stable
       - docker logs nginx
 
-  
-  - name: debug-workspace
+  - name: run-checks
     image: docker:24
+    depends_on:
+      - run-fastapi
+      - run-nginx
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
     commands:
       - |
-        docker run --rm \
-          -v /drone/src:/workspace \
-          python:3.12-slim \
+        docker exec fastapi \
           sh -c "
-            echo '=== PWD ===' &&
-            pwd &&
-            echo '=== /workspace ===' &&
-            ls -l /workspace &&
-            echo '=== /workspace/${DRONE_BRANCH} ===' &&
-            ls -l /workspace/${DRONE_BRANCH} || true
+            apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/* &&
+            pip install --no-cache-dir requests mysql-connector-python &&
+            for i in 1 2 3 4 5; do
+              echo 'Waiting for nginx (attempt '$i')...'
+              if curl -s http://nginx >/dev/null; then
+                echo 'nginx is ready'
+                break
+              fi
+              sleep 2
+            done &&
+            python ${DRONE_BRANCH}/check.py
           "
-
 
 trigger:
   branch:
