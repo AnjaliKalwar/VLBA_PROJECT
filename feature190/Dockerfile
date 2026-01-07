@@ -1,27 +1,15 @@
-FROM ubuntu:24.04
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install Python + venv
-RUN apt-get update && \
-    apt-get install -y python3 python3-venv python3-pip && \
-    rm -rf /var/lib/apt/lists/*
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# Create virtual environment
-RUN python3 -m venv /opt/venv
-
-# Activate venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Install dependencies INSIDE venv (PEP 668 compliant)
-RUN pip install fastapi uvicorn mysql-connector-python
+# Install dependencies (no apt, no venv)
+RUN pip install --no-cache-dir fastapi uvicorn mysql-connector-python
 
 # Copy application
 COPY solution.py .
 
+# Match the port used inside solution.py
 EXPOSE 5000
 
-# Run application
+# Run solution.py directly (uvicorn starts inside it)
 CMD ["python", "solution.py"]
