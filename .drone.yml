@@ -40,10 +40,12 @@ steps:
       - test -f ./${DRONE_BRANCH}/check.py
 
   # -----------------------------
-  # Build FastAPI image
+  # Build FastAPI Image
   # -----------------------------
   - name: build-fastapi
-    image: docker:26
+    image: docker:latest
+    environment:
+      DOCKER_API_VERSION: "1.44"
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
@@ -51,10 +53,12 @@ steps:
       - docker build --network=host -t fastapi-app -f ${DRONE_BRANCH}/Dockerfile ${DRONE_BRANCH}
 
   # -----------------------------
-  # Run FastAPI container
+  # Run FastAPI
   # -----------------------------
   - name: run-fastapi
-    image: docker:26
+    image: docker:latest
+    environment:
+      DOCKER_API_VERSION: "1.44"
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
@@ -62,8 +66,10 @@ steps:
       - docker network create appnet || true
       - docker rm -f fastapi || true
       - |
-        docker run -d --name fastapi \
+        docker run -d \
+          --name fastapi \
           --network appnet \
+          -p 5000:5000 \
           -e DB1_HOST=db1 \
           -e DB2_HOST=db2 \
           -e DB_USER=app_user \
@@ -74,10 +80,12 @@ steps:
       - docker logs fastapi
 
   # -----------------------------
-  # Run NGINX container
+  # Run NGINX
   # -----------------------------
   - name: run-nginx
-    image: docker:26
+    image: docker:latest
+    environment:
+      DOCKER_API_VERSION: "1.44"
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
@@ -86,19 +94,22 @@ steps:
     commands:
       - docker rm -f nginx || true
       - |
-        docker run -d --name nginx \
+        docker run -d \
+          --name nginx \
           --network appnet \
           -p 80:80 \
-          -v $(pwd)/${DRONE_BRANCH}/nginx:/etc/nginx/conf.d:ro \
+          -v /drone/src/${DRONE_BRANCH}/nginx:/etc/nginx/conf.d:ro \
           nginx:stable
       - sleep 3
       - docker logs nginx
 
   # -----------------------------
-  # Run functional checks
+  # Run Checks (same network)
   # -----------------------------
   - name: run-checks
-    image: docker:26
+    image: docker:latest
+    environment:
+      DOCKER_API_VERSION: "1.44"
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
