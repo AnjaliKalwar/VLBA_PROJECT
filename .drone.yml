@@ -5,11 +5,6 @@ name: login-logout-pipeline
 clone:
   skip_verify: true
 
-volumes:
-  - name: dockersock
-    host:
-      path: /var/run/docker.sock
-
 services:
   - name: db1
     image: mysql:8.0
@@ -29,7 +24,7 @@ services:
 
 steps:
   # -----------------------------
-  # Check required files
+  # Check files
   # -----------------------------
   - name: check-required-files
     image: ubuntu:24.04
@@ -45,82 +40,47 @@ steps:
   - name: build-fastapi
     image: docker:24
     volumes:
-      - name: dockersock
-        path: /var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock
     commands:
-      - docker build --network=host -t fastapi-app -f ${DRONE_BRANCH}/Dockerfile ${DRONE_BRANCH}
+      - docker build -t fastapi-app -f ${DRONE_BRANCH}/Dockerfile ${DRONE_BRANCH}
 
   # -----------------------------
-  # Run FastAPI
+  # Run FastAPI (Drone network)
   # -----------------------------
-  - name: run-fastapi
-    image: docker:24
-    volumes:
-      - name: dockersock
-        path: /var/run/docker.sock
+  - name: fastapi
+    image: fastapi-app
+    environment:
+      DB1_HOST: db1
+      DB2_HOST: db2
+      DB_USER: app_user
+      DB_PASS: app_password
+      DB_NAME: login_db
     commands:
-      - docker network create appnet || true
-      - docker network connect appnet db1 || true
-      - docker network connect appnet db2 || true
-      - docker rm -f fastapi || true
-      - |
-        docker run -d \
-          --name fastapi \
-          --network appnet \
-          -p 5000:5000 \
-          -e DB1_HOST=db1 \
-          -e DB2_HOST=db2 \
-          -e DB_USER=app_user \
-          -e DB_PASS=app_password \
-          -e DB_NAME=login_db \
-          fastapi-app
-      - sleep 5
-      - docker logs fastapi
+      - python solution.py
 
   # -----------------------------
-  # Run NGINX
+  # Run NGINX (Drone network)
   # -----------------------------
-  - name: run-nginx
-    image: docker:24
-    volumes:
-      - name: dockersock
-        path: /var/run/docker.sock
+  - name: nginx
+    image: nginx:stable
     depends_on:
-      - run-fastapi
+      - fastapi
     commands:
-      - docker rm -f nginx || true
-      - |
-        docker run -d \
-          --name nginx \
-          --network appnet \
-          -p 80:80 \
-          -v /drone/src/${DRONE_BRANCH}/nginx:/etc/nginx/conf.d:ro \
-          nginx:stable
-      - sleep 3
-      - docker logs nginx
+      - cp ${DRONE_BRANCH}/nginx/*.conf /etc/nginx/conf.d/
+      - nginx -g "daemon off;"
 
   # -----------------------------
-  # Run checks
+  # Run checks (Drone network)
   # -----------------------------
   - name: run-checks
-    image: docker:24
-    volumes:
-      - name: dockersock
-        path: /var/run/docker.sock
+    image: python:3.12-slim
     depends_on:
-      - run-nginx
+      - nginx
+    environment:
+      API_URL: http://nginx
     commands:
-      - |
-        docker run --rm \
-          --network appnet \
-          -e API_URL=http://nginx \
-          -v /drone/src/${DRONE_BRANCH}:/app \
-          -w /app \
-          python:3.12-slim \
-          sh -c "
-            pip install requests mysql-connector-python &&
-            python check.py
-          "
+      - pip install requests mysql-connector-python
+      - python ${DRONE_BRANCH}/check.py
 
 trigger:
   branch:
