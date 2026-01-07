@@ -79,22 +79,24 @@ steps:
 
   
   - name: run-checks
-    image: docker:24
-    volumes:
-      - name: dockersock
-        path: /var/run/docker.sock
+    image: python:3.12-slim
+    depends_on:
+      - run-nginx
+    environment:
+      API_URL: http://nginx
     commands:
+      - pip install requests mysql-connector-python
       - |
-        docker run --rm \
-          --network appnet \
-          -e API_URL=http://nginx \
-          -v /drone/src:/workspace \
-          -w /workspace \
-          python:3.12-slim \
-          sh -c "
-            pip install requests mysql-connector-python &&
-            python ${DRONE_BRANCH}/check.py
-          "
+        for i in 1 2 3 4 5; do
+          echo "Waiting for nginx (attempt $i)..."
+          if curl -s http://nginx >/dev/null; then
+            echo "nginx is ready"
+            break
+          fi
+          sleep 2
+        done
+      - python ${DRONE_BRANCH}/check.py
+
 
 
 trigger:
