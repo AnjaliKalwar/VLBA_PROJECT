@@ -64,6 +64,11 @@ steps:
         path: /var/run/docker.sock
     commands:
       - docker network create appnet || true
+
+      #  THIS IS THE CRITICAL FIX
+      - docker network connect appnet db1 || true
+      - docker network connect appnet db2 || true
+
       - docker rm -f fastapi || true
       - |
         docker run -d \
