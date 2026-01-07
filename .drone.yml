@@ -78,27 +78,24 @@ steps:
       - docker logs nginx
 
   
-  - name: run-checks
-    image: python:3.12-slim
-    depends_on:
-      - run-nginx
-    environment:
-      API_URL: http://nginx
+  - name: debug-workspace
+    image: docker:24
+    volumes:
+      - name: dockersock
+        path: /var/run/docker.sock
     commands:
-      - apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-      - pip install requests mysql-connector-python
       - |
-        for i in 1 2 3 4 5; do
-          echo "Waiting for nginx (attempt $i)..."
-          if curl -s http://nginx >/dev/null; then
-            echo "nginx is ready"
-            break
-          fi
-          sleep 2
-        done
-      - python ${DRONE_BRANCH}/check.py
-
-
+        docker run --rm \
+          -v /drone/src:/workspace \
+          python:3.12-slim \
+          sh -c "
+            echo '=== PWD ===' &&
+            pwd &&
+            echo '=== /workspace ===' &&
+            ls -l /workspace &&
+            echo '=== /workspace/${DRONE_BRANCH} ===' &&
+            ls -l /workspace/${DRONE_BRANCH} || true
+          "
 
 
 trigger:
