@@ -64,6 +64,7 @@ steps:
           -v /drone/src:/workspace \
           -w /workspace \
           fastapi-app
+      - sleep 5
       - docker logs fastapi
 
   - name: run-nginx
@@ -82,28 +83,24 @@ steps:
 
   - name: run-checks
     image: docker:24
-    depends_on:
-      - run-fastapi
-      - run-nginx
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
+    depends_on:
+      - run-nginx
     commands:
       - |
-        docker exec fastapi \
+        docker run --rm \
+          --network appnet \
+          -e API_URL=http://nginx \
+          -v /drone/src/${DRONE_BRANCH}:/app \
+          -w /app \
+          python:3.12-slim \
           sh -c "
-            apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/* &&
-            pip install --no-cache-dir requests mysql-connector-python &&
-            for i in 1 2 3 4 5; do
-              echo 'Waiting for nginx (attempt '$i')...'
-              if curl -s http://nginx >/dev/null; then
-                echo 'nginx is ready'
-                break
-              fi
-              sleep 2
-            done &&
-            python ${DRONE_BRANCH}/check.py
+            pip install requests mysql-connector-python &&
+            python check.py
           "
+
 
 trigger:
   branch:
