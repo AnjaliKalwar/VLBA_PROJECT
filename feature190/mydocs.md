@@ -135,3 +135,10 @@ Developer --> "Drone Pipeline" : git push / PR
 
 PLANT UML IMAGE REFERENCE:
 https://www.plantuml.com/plantuml/dpng/bP9HQzim4CVVzIcEF3MC95xeeEHXj6lO5cXBbhHi3u6Xs4SYOfzSwPJ66uLzXtt3VPATadeDMMheWsqu__NJxwGxzwmTXo9NVcMer4uNaDgYj8J4Kwvo18SfQrhak1TvSBhyQZ9UGZz9zkg5tboZztg1K_C3jpyL6nRAvQXtEOInAJ4tXF3drs-uiWj3FNdRm32jF6C19qDd2U4D36swGjTMIgTi7GnnZRajqIb5DaDenLoamYGGePlHoTqy48Ts2tug1SzDrD5wwwV_49_z5AFd3edHfkD4oD12cE9Kjbk7KHS8qYMcArz7vBijTCjAuf9_ZA-TwHJTsgJYQecr23WlNI9hMP3LjdNsvjFevjkCjXe3ptgUOqm071XCS2qSQShPJJMZiNKCPybEz74V-55xlXYFPhGx7UYVTfFJeyWxaRIEdc3laaHmXw4Q1nTb6LktUM1ZANPzPE_hQlhb2eOVtiwegFnzFZZh9izRPrhQqrvoUPo3xzcy0T5_9I8-0letDT3flFz_40QmC0nby4lemNYYLDCGHCJn2rBD0z6uL1qjnmMDXotgdszln-3mFeYoLurXeHs_ZSY9rGTd65y3wRyCEKVAGf7_1G00
+
+
+REFERENCE LINKS:
+1.https://fastapi.tiangolo.com/tutorial/body/#request-body-path-query-parameters
+2.https://www.w3schools.com/sql/sql_create_table.asp
+3.https://docs.nginx.com/nginx/admin-guide/web-server/reverse-proxy/
+4.Used chatbots for error solving
