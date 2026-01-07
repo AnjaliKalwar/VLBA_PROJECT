@@ -1,27 +1,37 @@
 FROM ubuntu:24.04
 
+# Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install Python + venv
-RUN apt-get update && \
-    apt-get install -y python3 python3-venv python3-pip && \
-    rm -rf /var/lib/apt/lists/*
-
+# Set working directory
 WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create virtual environment
 RUN python3 -m venv /opt/venv
-
-# Activate venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install dependencies INSIDE venv (PEP 668 compliant)
-RUN pip install fastapi uvicorn mysql-connector-python
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip
 
-# Copy application
-COPY solution.py .
+# 🔹 Install Python dependencies directly (NO requirements.txt)
+RUN pip install --no-cache-dir \
+    fastapi \
+    uvicorn \
+    mysql-connector-python
 
+# Copy application code
+COPY . .
+
+# Expose app port
 EXPOSE 5000
 
-# Run application
-CMD ["python", "solution.py"]
+# Optional: wait for DBs before starting
+CMD ["sh", "-c", "nc -z db1 3306 && nc -z db2 3306 && python solution.py"]
