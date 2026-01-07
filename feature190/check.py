@@ -27,10 +27,26 @@ DB_CONFIG_2 = {
 }
 
 # -----------------------------
+# Wait for API (nginx + fastapi)
+# -----------------------------
+print("Waiting for API to be ready...")
+for i in range(20):
+    try:
+        r = requests.get(API_URL, timeout=2)
+        print("API is reachable")
+        break
+    except Exception as e:
+        print(f"API not ready yet ({i+1}/20): {e}")
+        time.sleep(2)
+else:
+    print("API never became ready")
+    exit(1)
+
+# -----------------------------
 # Helper: print DB tables
 # -----------------------------
 def print_db_state(db_name, config):
-    print(f"\n {db_name} state:")
+    print(f"\n{db_name} state:")
     conn = mysql.connector.connect(**config)
     cur = conn.cursor()
 
@@ -61,9 +77,11 @@ resp = requests.post(
 if resp.status_code == 200:
     print(f"User {USERNAME} created")
 elif resp.status_code == 400:
-    print(f" User {USERNAME} already exists")
+    print(f"User {USERNAME} already exists")
 else:
-    print(" create_login failed")
+    print("create_login failed")
+    print("Status code:", resp.status_code)
+    print("Response body:", resp.text)
     exit(1)
 
 # -----------------------------
@@ -75,11 +93,13 @@ resp = requests.post(
 )
 
 if resp.status_code != 200:
-    print(" Login failed")
+    print("Login failed")
+    print("Status code:", resp.status_code)
+    print("Response body:", resp.text)
     exit(1)
 
 session_id = resp.json()["session_id"]
-print(f" Login successful, session_id={session_id}")
+print(f"Login successful, session_id={session_id}")
 
 # -----------------------------
 # Show DB state AFTER login
@@ -96,10 +116,12 @@ resp = requests.post(
 )
 
 if resp.status_code != 200:
-    print(" Logout failed")
+    print("Logout failed")
+    print("Status code:", resp.status_code)
+    print("Response body:", resp.text)
     exit(1)
 
-print(f"\n Logout successful for session_id={session_id}")
+print(f"\nLogout successful for session_id={session_id}")
 
 # -----------------------------
 # Show DB state AFTER logout
@@ -107,4 +129,4 @@ print(f"\n Logout successful for session_id={session_id}")
 print_db_state("DB1", DB_CONFIG_1)
 print_db_state("DB2", DB_CONFIG_2)
 
-print("\n CHECK COMPLETED SUCCESSFULLY")
+print("\nCHECK COMPLETED SUCCESSFULLY")
