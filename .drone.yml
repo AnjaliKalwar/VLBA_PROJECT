@@ -5,11 +5,6 @@ name: login-logout-pipeline
 clone:
   skip_verify: true
 
-volumes:
-  - name: dockersock
-    host:
-      path: /var/run/docker.sock
-
 services:
   - name: db1
     image: mysql:8.0
@@ -27,6 +22,58 @@ services:
       MYSQL_PASSWORD: app_password
       MYSQL_ROOT_PASSWORD: rootpassword
 
+  - name: fastapi
+    image: ubuntu:24.04
+    working_dir: /drone/src/feature190
+    environment:
+      DB1_HOST: db1
+      DB2_HOST: db2
+      DB_USER: app_user
+      DB_PASS: app_password
+      DB_NAME: login_db
+    commands:
+      - apt-get update
+      - apt-get install -y python3 python3-pip python3-venv
+      - python3 -m venv venv
+      - . venv/bin/activate
+      - pip install fastapi uvicorn mysql-connector-python
+      - python3 solution.py
+
+  - name: nginx
+    image: nginx:stable
+    commands:
+      - |
+        cat <<'EOF' > /etc/nginx/conf.d/default.conf
+        upstream fastapi_app {
+            server fastapi:5000;
+        }
+
+        server {
+            listen 80;
+
+            location /health {
+                proxy_pass http://fastapi_app/health;
+            }
+
+            location /create_login {
+                proxy_pass http://fastapi_app/create_login;
+            }
+
+            location /login {
+                proxy_pass http://fastapi_app/login;
+            }
+
+            location /logout {
+                proxy_pass http://fastapi_app/logout;
+            }
+
+            location / {
+                return 200 "NGINX reverse proxy running\n";
+            }
+        }
+        EOF
+        nginx -g 'daemon off;'
+
 steps:
   - name: check-required-files
     image: ubuntu:24.04
@@ -36,75 +83,34 @@ steps:
       - test -f ./${DRONE_BRANCH}/solution.py
       - test -f ./${DRONE_BRANCH}/check.py
 
-  - name: build-fastapi
-    image: docker:24
-    volumes:
-      - name: dockersock
-        path: /var/run/docker.sock
+  - name: test-nginx-routing
+    image: ubuntu:24.04
     commands:
-      - docker build --network=host -t fastapi-app -f ${DRONE_BRANCH}/Dockerfile ${DRONE_BRANCH}
-
-  - name: run-fastapi
-    image: docker:24
-    volumes:
-      - name: dockersock
-        path: /var/run/docker.sock
-    commands:
-      - docker network create appnet || true
-      - docker rm -f fastapi || true
+      - apt-get update && apt-get install -y curl
       - |
-        docker run -d --name fastapi \
-          --network appnet \
-          -e DB1_HOST=db1 \
-          -e DB2_HOST=db2 \
-          -e DB_USER=app_user \
-          -e DB_PASS=app_password \
-          -e DB_NAME=login_db \
-          -e API_URL=http://nginx \
-          -v /drone/src:/workspace \
-          -w /workspace \
-          fastapi-app
-      - docker logs fastapi
+        for i in 1 2 3 4 5 6 7 8 9 10; do
+          echo "Waiting for nginx / fastapi readiness (attempt $i)..."
+          if curl -s http://nginx/health >/dev/null; then
+            echo "NGINX + FASTAPI READY"
+            break
+          fi
+          sleep 2
+        done
+      - curl http://nginx/
 
-  - name: run-nginx
-    image: docker:24
-    volumes:
-      - name: dockersock
-        path: /var/run/docker.sock
+  - name: run checks
+    image: ubuntu:24.04
+    environment:
+      API_URL: http://nginx
+      PYTHONUNBUFFERED: "1"
     commands:
-      - docker rm -f nginx || true
-      - |
-        docker run -d --name nginx \
-          --network appnet \
-          -v $(pwd)/${DRONE_BRANCH}/nginx:/etc/nginx/conf.d:ro \
-          nginx:stable
-      - docker logs nginx
-
-  - name: run-checks
-    image: docker:24
-    depends_on:
-      - run-fastapi
-      - run-nginx
-    volumes:
-      - name: dockersock
-        path: /var/run/docker.sock
-    commands:
-      - |
-        docker exec fastapi \
-          sh -c "
-            apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/* &&
-            pip install --no-cache-dir requests mysql-connector-python &&
-            for i in 1 2 3 4 5; do
-              echo 'Waiting for nginx (attempt '$i')...'
-              if curl -s http://nginx >/dev/null; then
-                echo 'nginx is ready'
-                break
-              fi
-              sleep 2
-            done &&
-            python ${DRONE_BRANCH}/check.py
-          "
-
+      - apt-get update
+      - apt-get install -y python3 python3-venv python3-pip
+      - python3 -m venv venv
+      - . venv/bin/activate
+      - pip install requests mysql-connector-python
+      - python ${DRONE_BRANCH}/check.py
+      
 trigger:
   branch:
     include:

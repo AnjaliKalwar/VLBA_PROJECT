@@ -30,7 +30,7 @@ DB_CONFIG_2 = {
 # Helper: print DB tables
 # -----------------------------
 def print_db_state(db_name, config):
-    print(f"\n📦 {db_name} state:")
+    print(f"\n {db_name} state:")
     conn = mysql.connector.connect(**config)
     cur = conn.cursor()
 
@@ -59,11 +59,11 @@ resp = requests.post(
 )
 
 if resp.status_code == 200:
-    print(f"✅ User {USERNAME} created")
+    print(f"User {USERNAME} created")
 elif resp.status_code == 400:
-    print(f"ℹ️ User {USERNAME} already exists")
+    print(f" User {USERNAME} already exists")
 else:
-    print("❌ create_login failed")
+    print(" create_login failed")
     exit(1)
 
 # -----------------------------
@@ -75,11 +75,11 @@ resp = requests.post(
 )
 
 if resp.status_code != 200:
-    print("❌ Login failed")
+    print(" Login failed")
     exit(1)
 
 session_id = resp.json()["session_id"]
-print(f"✅ Login successful, session_id={session_id}")
+print(f" Login successful, session_id={session_id}")
 
 # -----------------------------
 # Show DB state AFTER login
@@ -96,10 +96,10 @@ resp = requests.post(
 )
 
 if resp.status_code != 200:
-    print("❌ Logout failed")
+    print(" Logout failed")
     exit(1)
 
-print(f"\n✅ Logout successful for session_id={session_id}")
+print(f"\n Logout successful for session_id={session_id}")
 
 # -----------------------------
 # Show DB state AFTER logout
@@ -107,4 +107,4 @@ print(f"\n✅ Logout successful for session_id={session_id}")
 print_db_state("DB1", DB_CONFIG_1)
 print_db_state("DB2", DB_CONFIG_2)
 
-print("\n🎉 CHECK COMPLETED SUCCESSFULLY")
+print("\n CHECK COMPLETED SUCCESSFULLY")
