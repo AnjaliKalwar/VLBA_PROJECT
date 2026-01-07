@@ -85,6 +85,7 @@ steps:
     environment:
       API_URL: http://nginx
     commands:
+      - apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
       - pip install requests mysql-connector-python
       - |
         for i in 1 2 3 4 5; do
@@ -96,6 +97,7 @@ steps:
           sleep 2
         done
       - python ${DRONE_BRANCH}/check.py
+
 
 
 
