@@ -40,12 +40,10 @@ steps:
       - test -f ./${DRONE_BRANCH}/check.py
 
   # -----------------------------
-  # Build FastAPI Image
+  # Build FastAPI image
   # -----------------------------
   - name: build-fastapi
-    image: docker:latest
-    environment:
-      DOCKER_API_VERSION: "1.44"
+    image: docker:24
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
@@ -56,19 +54,14 @@ steps:
   # Run FastAPI
   # -----------------------------
   - name: run-fastapi
-    image: docker:latest
-    environment:
-      DOCKER_API_VERSION: "1.44"
+    image: docker:24
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
     commands:
       - docker network create appnet || true
-
-      #  THIS IS THE CRITICAL FIX
       - docker network connect appnet db1 || true
       - docker network connect appnet db2 || true
-
       - docker rm -f fastapi || true
       - |
         docker run -d \
@@ -88,9 +81,7 @@ steps:
   # Run NGINX
   # -----------------------------
   - name: run-nginx
-    image: docker:latest
-    environment:
-      DOCKER_API_VERSION: "1.44"
+    image: docker:24
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
@@ -109,12 +100,10 @@ steps:
       - docker logs nginx
 
   # -----------------------------
-  # Run Checks (same network)
+  # Run checks
   # -----------------------------
   - name: run-checks
-    image: docker:latest
-    environment:
-      DOCKER_API_VERSION: "1.44"
+    image: docker:24
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
