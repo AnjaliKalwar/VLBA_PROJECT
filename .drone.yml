@@ -5,6 +5,17 @@ name: login-logout-pipeline
 clone:
   skip_verify: true
 
+# -----------------------------
+# Volumes
+# -----------------------------
+volumes:
+  - name: dockersock
+    host:
+      path: /var/run/docker.sock
+
+# -----------------------------
+# Services (Databases)
+# -----------------------------
 services:
   - name: db1
     image: mysql:8.0
@@ -22,10 +33,10 @@ services:
       MYSQL_PASSWORD: app_password
       MYSQL_ROOT_PASSWORD: rootpassword
 
+# -----------------------------
+# Steps
+# -----------------------------
 steps:
-  # -----------------------------
-  # Check files
-  # -----------------------------
   - name: check-required-files
     image: ubuntu:24.04
     commands:
@@ -34,19 +45,14 @@ steps:
       - test -f ./${DRONE_BRANCH}/solution.py
       - test -f ./${DRONE_BRANCH}/check.py
 
-  # -----------------------------
-  # Build FastAPI image
-  # -----------------------------
   - name: build-fastapi
     image: docker:24
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - name: dockersock
+        path: /var/run/docker.sock
     commands:
       - docker build -t fastapi-app -f ${DRONE_BRANCH}/Dockerfile ${DRONE_BRANCH}
 
-  # -----------------------------
-  # Run FastAPI (Drone network)
-  # -----------------------------
   - name: fastapi
     image: fastapi-app
     environment:
@@ -58,9 +64,6 @@ steps:
     commands:
       - python solution.py
 
-  # -----------------------------
-  # Run NGINX (Drone network)
-  # -----------------------------
   - name: nginx
     image: nginx:stable
     depends_on:
@@ -69,9 +72,6 @@ steps:
       - cp ${DRONE_BRANCH}/nginx/*.conf /etc/nginx/conf.d/
       - nginx -g "daemon off;"
 
-  # -----------------------------
-  # Run checks (Drone network)
-  # -----------------------------
   - name: run-checks
     image: python:3.12-slim
     depends_on:
