@@ -5,17 +5,11 @@ name: login-logout-pipeline
 clone:
   skip_verify: true
 
-# -----------------------------
-# Volumes
-# -----------------------------
 volumes:
   - name: dockersock
     host:
       path: /var/run/docker.sock
 
-# -----------------------------
-# Services (Databases)
-# -----------------------------
 services:
   - name: db1
     image: mysql:8.0
@@ -33,9 +27,6 @@ services:
       MYSQL_PASSWORD: app_password
       MYSQL_ROOT_PASSWORD: rootpassword
 
-# -----------------------------
-# Steps
-# -----------------------------
 steps:
   - name: check-required-files
     image: ubuntu:24.04
@@ -46,38 +37,51 @@ steps:
       - test -f ./${DRONE_BRANCH}/check.py
 
   - name: build-fastapi
-    image: docker:24
+    image: docker:latest
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
     commands:
       - docker build -t fastapi-app -f ${DRONE_BRANCH}/Dockerfile ${DRONE_BRANCH}
 
-  - name: fastapi
-    image: fastapi-app
-    environment:
-      DB1_HOST: db1
-      DB2_HOST: db2
-      DB_USER: app_user
-      DB_PASS: app_password
-      DB_NAME: login_db
+  - name: run-fastapi
+    image: docker:latest
+    volumes:
+      - name: dockersock
+        path: /var/run/docker.sock
     commands:
-      - python solution.py
+      - docker rm -f fastapi || true
+      - |
+        docker run -d --name fastapi \
+          --network host \
+          -e DB1_HOST=db1 \
+          -e DB2_HOST=db2 \
+          -e DB_USER=app_user \
+          -e DB_PASS=app_password \
+          -e DB_NAME=login_db \
+          fastapi-app
+      - sleep 5
+      - docker logs fastapi
 
-  - name: nginx
-    image: nginx:stable
-    depends_on:
-      - fastapi
+  - name: run-nginx
+    image: docker:latest
+    volumes:
+      - name: dockersock
+        path: /var/run/docker.sock
     commands:
-      - cp ${DRONE_BRANCH}/nginx/*.conf /etc/nginx/conf.d/
-      - nginx -g "daemon off;"
+      - docker rm -f nginx || true
+      - |
+        docker run -d --name nginx \
+          --network host \
+          -v $(pwd)/${DRONE_BRANCH}/nginx:/etc/nginx/conf.d:ro \
+          nginx:stable
+      - sleep 2
+      - docker logs nginx
 
   - name: run-checks
     image: python:3.12-slim
-    depends_on:
-      - nginx
     environment:
-      API_URL: http://nginx
+      API_URL: http://localhost
     commands:
       - pip install requests mysql-connector-python
       - python ${DRONE_BRANCH}/check.py
