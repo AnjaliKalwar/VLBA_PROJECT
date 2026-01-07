@@ -5,17 +5,11 @@ name: login-logout-pipeline
 clone:
   skip_verify: true
 
-# -----------------------------
-# Docker socket (needed to run containers)
-# -----------------------------
 volumes:
   - name: dockersock
     host:
       path: /var/run/docker.sock
 
-# -----------------------------
-# Database services (auto networked by Drone)
-# -----------------------------
 services:
   - name: db1
     image: mysql:8.0
@@ -33,13 +27,9 @@ services:
       MYSQL_PASSWORD: app_password
       MYSQL_ROOT_PASSWORD: rootpassword
 
-# -----------------------------
-# Pipeline steps
-# -----------------------------
 steps:
-
   # -----------------------------
-  # Verify required files exist
+  # Check required files
   # -----------------------------
   - name: check-required-files
     image: ubuntu:24.04
@@ -50,15 +40,13 @@ steps:
       - test -f ./${DRONE_BRANCH}/check.py
 
   # -----------------------------
-  # Build FastAPI image (Ubuntu 24.04 based)
+  # Build FastAPI image
   # -----------------------------
   - name: build-fastapi
-    image: docker:24
+    image: docker:26
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
-    depends_on:
-      - check-required-files
     commands:
       - docker build --network=host -t fastapi-app -f ${DRONE_BRANCH}/Dockerfile ${DRONE_BRANCH}
 
@@ -66,12 +54,10 @@ steps:
   # Run FastAPI container
   # -----------------------------
   - name: run-fastapi
-    image: docker:24
+    image: docker:26
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
-    depends_on:
-      - build-fastapi
     commands:
       - docker network create appnet || true
       - docker rm -f fastapi || true
@@ -88,10 +74,10 @@ steps:
       - docker logs fastapi
 
   # -----------------------------
-  # Run NGINX reverse proxy
+  # Run NGINX container
   # -----------------------------
   - name: run-nginx
-    image: docker:24
+    image: docker:26
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
@@ -109,10 +95,10 @@ steps:
       - docker logs nginx
 
   # -----------------------------
-  # Run functional checks INSIDE appnet
+  # Run functional checks
   # -----------------------------
   - name: run-checks
-    image: docker:24
+    image: docker:26
     volumes:
       - name: dockersock
         path: /var/run/docker.sock
@@ -131,9 +117,6 @@ steps:
             python check.py
           "
 
-# -----------------------------
-# Trigger
-# -----------------------------
 trigger:
   branch:
     include:
