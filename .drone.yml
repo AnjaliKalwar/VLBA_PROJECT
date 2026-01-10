@@ -7,7 +7,7 @@ clone:
 
 services:
   - name: db1
-    image: mysql:8.0
+    image: mysql:8.0.33
     environment:
       MYSQL_DATABASE: login_db
       MYSQL_USER: app_user
@@ -15,7 +15,7 @@ services:
       MYSQL_ROOT_PASSWORD: rootpassword
 
   - name: db2
-    image: mysql:8.0
+    image: mysql:8.0.33
     environment:
       MYSQL_DATABASE: login_db
       MYSQL_USER: app_user
@@ -75,32 +75,7 @@ services:
         nginx -g 'daemon off;'
 
 steps:
-  - name: setup-network-and-db
-    image: docker:26
-    volumes:
-      - name: dockersock
-        path: /var/run/docker.sock
-    commands:
-      - docker network inspect appnet >/dev/null 2>&1 || docker network create appnet
-      - docker rm -f db1 db2 || true
-
-      - |
-        docker run -d --name db1 --network appnet \
-          -e MYSQL_DATABASE=login_db \
-          -e MYSQL_USER=app_user \
-          -e MYSQL_PASSWORD=app_password \
-          -e MYSQL_ROOT_PASSWORD=rootpassword \
-          mysql:8.0
-
-      - |
-        docker run -d --name db2 --network appnet \
-          -e MYSQL_DATABASE=login_db \
-          -e MYSQL_USER=app_user \
-          -e MYSQL_PASSWORD=app_password \
-          -e MYSQL_ROOT_PASSWORD=rootpassword \
-          mysql:8.0
-
-      - sleep 20
+  
 
   - name: test-nginx-routing
     image: ubuntu:24.04
