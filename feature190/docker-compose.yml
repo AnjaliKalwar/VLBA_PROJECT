@@ -1,0 +1,56 @@
+version: "3.9"
+
+services:
+  db1:
+    image: mysql:8.0
+    container_name: db1
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: login_db
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: app_password
+    ports:
+      - "3307:3306"
+
+  db2:
+    image: mysql:8.0
+    container_name: db2
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: login_db
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: app_password
+    ports:
+      - "3308:3306"
+
+  fastapi:
+    image: python:3.12-slim
+    container_name: fastapi
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      DB1_HOST: db1
+      DB2_HOST: db2
+      DB_USER: app_user
+      DB_PASS: app_password
+      DB_NAME: login_db
+    command: >
+      sh -c "pip install fastapi uvicorn mysql-connector-python &&
+            uvicorn solution:app --host 0.0.0.0 --port 5003"
+    ports:
+      - "5003:5003"
+    depends_on:
+      - db1
+      - db2
+
+
+  nginx:
+    image: nginx:1.25
+    container_name: nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      - fastapi
